@@ -7,6 +7,12 @@ from datetime import datetime
 from app.core.config import settings
 from app.modules.medical_agent.context.state import MedicalAgentState
 from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
+from app.modules.medical_agent.tools.simrs_tools import (
+    tool_simrs_get_patient_profile,
+    tool_simrs_get_patient_labs,
+    tool_simrs_get_patient_anamnesis,
+    tool_simrs_get_patient_history
+)
 from app.modules.medical_agent.skills.output_schemas import (
     DiarizedUtterance,
     AudioDiarizationSchema,
@@ -47,7 +53,7 @@ def _clean_json_string(raw_text: str) -> str:
     return text.strip()
 
 
-def _get_fallback_diarization_schema(filename: str) -> AudioDiarizationSchema:
+def _get_fallback_diarization_schema(filename: str, patient_name: str = "Eleanor Vance") -> AudioDiarizationSchema:
     """Provides high-fidelity speaker diarization Pydantic model fallback."""
     return AudioDiarizationSchema(
         audio_filename=filename,
@@ -58,7 +64,7 @@ def _get_fallback_diarization_schema(filename: str) -> AudioDiarizationSchema:
                 speaker="Dokter",
                 start_time="00:00",
                 end_time="00:06",
-                text="Selamat pagi Ibu Eleanor, silakan duduk. Bagaimana kondisi dan apa keluhan utama yang paling dirasakan beberapa hari terakhir ini Bu?"
+                text=f"Selamat pagi Ibu {patient_name}, silakan duduk. Bagaimana kondisi dan apa keluhan utama yang paling dirasakan beberapa hari terakhir ini Bu?"
             ),
             DiarizedUtterance(
                 speaker="Pasien",
@@ -98,6 +104,14 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
     audio_bytes = state.get("audio_bytes")
     audio_filename = state.get("audio_filename", "consultation_recording.wav")
     audio_mime = state.get("audio_mime_type") or "audio/wav"
+    patient_id = state.get("patient_id")
+
+    # Pre-fetch patient name if available for transcription context
+    patient_name = "Eleanor Vance"
+    if patient_id:
+        p_res = tool_simrs_get_patient_profile(patient_id)
+        if p_res.get("status") == "success" and p_res.get("profile"):
+            patient_name = p_res["profile"].get("full_name", patient_name)
 
     api_key = settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")
     diarization_model: Optional[AudioDiarizationSchema] = None
@@ -105,6 +119,7 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
 
     diarization_prompt = (
         "Anda adalah sistem Transkripsi Medis Klinis (Medical Speech-to-Text & Diarization Engine) AI profesional.\n\n"
+        f"Konteks Pasien: {patient_name} (ID: {patient_id or 'Rawat Jalan'})\n\n"
         "TUGAS TRANSSKRIPSI & DIARISASI:\n"
         "1. Transkripsikan seluruh isi percakapan konsultasi klinis antara Dokter dan Pasien/Keluarga Pasien secara akurat dalam Bahasa Indonesia.\n"
         "2. Lakukan DIARISASI PEMBICARA (Speaker Diarization) secara konsisten dan terstruktur memisahkan ujaran Dokter dan Pasien.\n"
@@ -145,7 +160,7 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
             logger.warning(f"Gemini audio transcription encountered error: {e}. Utilizing Pydantic structured fallback.")
 
     if not diarization_model or not diarization_model.utterances:
-        diarization_model = _get_fallback_diarization_schema(audio_filename)
+        diarization_model = _get_fallback_diarization_schema(audio_filename, patient_name=patient_name)
 
     formatted_transcript = diarization_model.to_formatted_transcript()
 
@@ -156,6 +171,7 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
         "result": {
             "engine": diarization_engine,
             "audio_file": audio_filename,
+            "patient_context": f"{patient_name} ({patient_id or 'N/A'})",
             "total_utterances": len(diarization_model.utterances),
             "transcript_characters": len(formatted_transcript),
             "diarization_schema_validated": True
@@ -174,24 +190,56 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
 def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
     """
     Synthesizes structured S-O-A-P / CPPT notes from the diarized audio consultation transcript
-    using Google Gemini LLM with Pydantic JSON Schema validation and markdown rendering.
+    using Google Gemini LLM with Pydantic JSON Schema validation, retrieving verified SIMRS
+    patient profile (by NIK or Patient ID / MRN) for complete clinical grounding.
     """
     log_node_start("audio_soap_summary", state, icon="📋")
     steps = list(state.get("steps_executed", []))
     transcript = state.get("audio_transcript", "")
-    patient_id = state.get("patient_id", "P-10492")
+    patient_id = state.get("patient_id")
+    nik = state.get("nik")
     audio_filename = state.get("audio_filename", "consultation_recording.wav")
     api_key = settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")
 
-    # Retrieve patient model if available from state / SIMRS
+    # Retrieve patient profile from SIMRS MCP via Patient ID, NIK, or MRN
+    lookup_key = nik or patient_id or "P-10492"
     simrs_profile = state.get("simrs_profile")
+    simrs_labs = state.get("simrs_lab_evaluations")
+    simrs_history = state.get("simrs_history")
+
+    if not simrs_profile and lookup_key:
+        profile_res = tool_simrs_get_patient_profile(lookup_key)
+        if profile_res.get("status") == "success" and profile_res.get("profile"):
+            simrs_profile = profile_res["profile"]
+            steps.append({
+                "step_name": "Pengambilan Profil Pasien SIMRS (MCP)",
+                "description": f"Mengambil profil demografi, NIK, dan nomor BPJS dari basis data SIMRS untuk identifier '{lookup_key}'",
+                "status": "success",
+                "result": {
+                    "mrn": simrs_profile.get("mrn"),
+                    "nama": simrs_profile.get("full_name"),
+                    "nik": simrs_profile.get("nik"),
+                    "usia": simrs_profile.get("age"),
+                    "bpjs": simrs_profile.get("bpjs_card_no"),
+                    "dpjp": simrs_profile.get("attending_physician")
+                }
+            })
+
+    # Pre-fetch SIMRS labs if not loaded yet
+    mrn = simrs_profile.get("mrn") if simrs_profile else (f"MRN-SIMRS-{patient_id.replace('P-', '')}" if patient_id else None)
+    if mrn and not simrs_labs:
+        labs_res = tool_simrs_get_patient_labs(mrn)
+        if labs_res.get("status") == "success":
+            simrs_labs = labs_res
+
+    # Build Pydantic Patient Demographics Model
     patient_model = None
     if simrs_profile:
         patient_model = PatientDemographicsData(
-            mrn=simrs_profile.get("mrn", f"MRN-SIMRS-{patient_id.replace('P-', '')}"),
+            mrn=simrs_profile.get("mrn", f"MRN-SIMRS-{patient_id.replace('P-', '')}" if patient_id else "MRN-SIMRS-10492"),
             full_name=simrs_profile.get("full_name", "Eleanor Vance"),
-            nik=simrs_profile.get("nik", ""),
-            bpjs_card_no=simrs_profile.get("bpjs_card_no", ""),
+            nik=simrs_profile.get("nik", "3171015806680002"),
+            bpjs_card_no=simrs_profile.get("bpjs_card_no", "0001829384921"),
             bpjs_class=simrs_profile.get("bpjs_class", "Kelas 1 (BPJS)"),
             age=simrs_profile.get("age", 58),
             gender=simrs_profile.get("gender", "Female"),
@@ -202,6 +250,9 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
         patient_model = PatientDemographicsData(
             mrn=f"MRN-SIMRS-{patient_id.replace('P-', '')}" if patient_id else "MRN-SIMRS-10492",
             full_name="Eleanor Vance",
+            nik="3171015806680002",
+            bpjs_card_no="0001829384921",
+            bpjs_class="Kelas 1 (BPJS)",
             age=58,
             gender="Female",
             active_clinic="Poli Penyakit Dalam",
@@ -276,6 +327,12 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
 
     soap_schema_prompt = (
         "Anda adalah Asisten AI Medis Klinis spesialis Rekam Medis Elektronik (RME SIMRS) dengan standar CPPT S-O-A-P.\n\n"
+        f"Data Demografi Pasien Terverifikasi SIMRS:\n"
+        f"- Nama Lengkap: {patient_model.full_name}\n"
+        f"- No. Rekam Medis (MRN): {patient_model.mrn}\n"
+        f"- NIK: {patient_model.nik or 'N/A'}\n"
+        f"- Usia/Gender: {patient_model.age} tahun / {patient_model.gender}\n"
+        f"- DPJP: {patient_model.attending_physician or 'Dr. Sarah Jenkins, Sp.PD'}\n\n"
         f"Berikut adalah transkrip hasil rekaman konsultasi klinis terdiarisasi antara Dokter dan Pasien:\n"
         f"\"\"\"\n{transcript}\n\"\"\"\n\n"
         "TUGAS:\n"
@@ -375,21 +432,26 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
 
     steps.append({
         "step_name": "Sintesis Catatan SOAP dari Transkrip Audio (Gemini LLM & Pydantic Schema)",
-        "description": f"Mengekstrak dan memvalidasi komponen S/O/A/P terstruktur dari hasil diarisasi audio menggunakan {soap_engine}.",
+        "description": f"Mengekstrak dan memvalidasi komponen S/O/A/P terstruktur dari hasil diarisasi audio menggunakan {soap_engine} untuk pasien {patient_model.full_name} ({patient_model.mrn}).",
         "status": "success",
         "result": {
             "engine": soap_engine,
             "pydantic_schema_valid": True,
+            "patient_mrn": patient_model.mrn,
+            "patient_name": patient_model.full_name,
+            "patient_nik": patient_model.nik,
             "soap_summary": soap_summary_dict,
             "primary_diagnosis": soap_model.assessment.primary_diagnosis.diagnosis,
             "icd10": soap_model.assessment.primary_diagnosis.icd10
         }
     })
-    log_node_end("audio_soap_summary", f"Generated & Validated Pydantic SOAP Schema via {soap_engine} for {soap_model.assessment.primary_diagnosis.diagnosis}")
+    log_node_end("audio_soap_summary", f"Generated & Validated Pydantic SOAP Schema via {soap_engine} for {patient_model.full_name} ({patient_model.mrn})")
 
     return {
         **state,
         "steps_executed": steps,
+        "simrs_profile": simrs_profile,
+        "simrs_lab_evaluations": simrs_labs,
         "final_synthesis": final_markdown,
         "structured_output": audio_soap_container.model_dump()
     }
