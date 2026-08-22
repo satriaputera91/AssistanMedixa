@@ -3,11 +3,11 @@ from typing import Dict, Any, Optional
 from app.modules.medical_agent.context.state import MedicalAgentState
 from app.modules.medical_agent.tools.simrs_tools import tool_simrs_get_patient_labs
 from app.modules.medical_agent.tools.clinical_tools import tool_generate_diagnostic_recommendations
-
-logger = logging.getLogger("medical_agent.skills.diagnostics")
+from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
 
 def node_eval_simrs_labs(state: MedicalAgentState) -> MedicalAgentState:
     """Evaluates serial laboratory panels, eGFR, uACR, and vital signs from SIMRS MCP."""
+    log_node_start("eval_simrs_labs", state, icon="🧪")
     patient_id = state.get("patient_id")
     steps = list(state.get("steps_executed", []))
     
@@ -27,6 +27,7 @@ def node_eval_simrs_labs(state: MedicalAgentState) -> MedicalAgentState:
                     "lab_serial": [f"{l['test_name']}: {l['value']} {l['unit']} ({l['status']})" for l in simrs_labs.get("latest_labs", [])]
                 }
             })
+            log_node_end("eval_simrs_labs", f"Retrieved {len(simrs_labs.get('latest_labs', []))} lab tests | Vitals: {bool(simrs_labs.get('vital_signs'))}")
         else:
             steps.append({
                 "step_name": "3. Evaluasi Hasil Lab & Pemeriksaan SIMRS (MCP)",
@@ -34,6 +35,7 @@ def node_eval_simrs_labs(state: MedicalAgentState) -> MedicalAgentState:
                 "status": "info",
                 "result": "Hasil lab tidak tersedia."
             })
+            log_node_end("eval_simrs_labs", "Lab data not found in SIMRS")
     else:
         steps.append({
             "step_name": "Evaluasi Hasil Lab SIMRS (Konsultasi Umum)",
@@ -41,6 +43,7 @@ def node_eval_simrs_labs(state: MedicalAgentState) -> MedicalAgentState:
             "status": "info",
             "result": "Melewati evaluasi lab spesifik pasien."
         })
+        log_node_end("eval_simrs_labs", "Skipped (General Consultation Mode)")
 
     return {
         **state,
@@ -50,6 +53,7 @@ def node_eval_simrs_labs(state: MedicalAgentState) -> MedicalAgentState:
 
 def node_diagnostic_recommendation(state: MedicalAgentState) -> MedicalAgentState:
     """Generates primary & differential diagnoses with ICD-10 codification and confidence scoring."""
+    log_node_start("diagnostic_recommendation", state, icon="🎯")
     steps = list(state.get("steps_executed", []))
     anamnesis = state.get("simrs_anamnesis")
     ehr_data = state.get("ehr_data")
@@ -73,6 +77,7 @@ def node_diagnostic_recommendation(state: MedicalAgentState) -> MedicalAgentStat
             "rencana_penunjang": diag_rec.get("recommended_workups", [])
         }
     })
+    log_node_end("diagnostic_recommendation", f"Generated {len(diag_rec.get('primary_recommendations', []))} primary diagnoses & {len(diag_rec.get('differential_diagnoses', []))} differentials | ICD-10: {diag_rec.get('icd10_coding', [])}")
 
     return {
         **state,

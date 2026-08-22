@@ -7,11 +7,11 @@ from app.modules.medical_agent.tools.simrs_tools import (
     tool_simrs_get_patient_anamnesis
 )
 from app.modules.medical_agent.tools.clinical_tools import tool_query_patient_ehr
-
-logger = logging.getLogger("medical_agent.skills.anamnesis")
+from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
 
 def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
     """Retrieves patient demographics, chronic history, and admissions from SIMRS."""
+    log_node_start("fetch_patient_history", state, icon="👤")
     patient_id = state.get("patient_id")
     steps = list(state.get("steps_executed", []))
     
@@ -80,6 +80,7 @@ def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
                         "lab_terbaru": ehr_result.get("recent_labs", {})
                     }
                 })
+        log_node_end("fetch_patient_history", f"SIMRS Profile: {bool(simrs_profile)} | History: {bool(simrs_history)} | EHR: {bool(ehr_result)}")
     else:
         steps.append({
             "step_name": "Konsultasi Medis Umum (Tanpa Data Pasien)",
@@ -87,6 +88,7 @@ def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
             "status": "info",
             "result": "Melewati pengambilan data rekam medis pasien."
         })
+        log_node_end("fetch_patient_history", "Skipped (General Consultation Mode)")
 
     return {
         **state,
@@ -98,6 +100,7 @@ def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
 
 def node_fetch_patient_anamnesis(state: MedicalAgentState) -> MedicalAgentState:
     """Retrieves patient clinical anamnesis (Chief Complaint, RPS, RPD, RPK) from SIMRS MCP."""
+    log_node_start("fetch_patient_anamnesis", state, icon="📝")
     patient_id = state.get("patient_id")
     steps = list(state.get("steps_executed", []))
     
@@ -120,6 +123,7 @@ def node_fetch_patient_anamnesis(state: MedicalAgentState) -> MedicalAgentState:
                     "riwayat_alergi": simrs_anamnesis.get("allergy_history")
                 }
             })
+            log_node_end("fetch_patient_anamnesis", f"Chief Complaint: '{simrs_anamnesis.get('chief_complaint')}'")
         else:
             steps.append({
                 "step_name": "2. Ambil Data Anamnesis SIMRS (MCP)",
@@ -127,6 +131,7 @@ def node_fetch_patient_anamnesis(state: MedicalAgentState) -> MedicalAgentState:
                 "status": "info",
                 "result": f"Data anamnesis untuk {simrs_mrn} tidak ditemukan di SIMRS."
             })
+            log_node_end("fetch_patient_anamnesis", "Anamnesis data not found in SIMRS")
     else:
         steps.append({
             "step_name": "Ambil Data Anamnesis SIMRS (Konsultasi Umum)",
@@ -134,6 +139,7 @@ def node_fetch_patient_anamnesis(state: MedicalAgentState) -> MedicalAgentState:
             "status": "info",
             "result": "Melewati pengambilan anamnesis pasien."
         })
+        log_node_end("fetch_patient_anamnesis", "Skipped (General Consultation Mode)")
 
     return {
         **state,

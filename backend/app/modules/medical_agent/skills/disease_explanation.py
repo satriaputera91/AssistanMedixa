@@ -1,11 +1,11 @@
 import logging
 from typing import Dict, Any
 from app.modules.medical_agent.context.state import MedicalAgentState
-
-logger = logging.getLogger("medical_agent.skills.disease_explanation")
+from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
 
 def node_km_disease_explanations(state: MedicalAgentState) -> MedicalAgentState:
     """Retrieves validated pathophysiological overviews, diagnostic criteria, and clinical staging."""
+    log_node_start("km_disease_explanations", state, icon="📖")
     steps = list(state.get("steps_executed", []))
     anamnesis = state.get("simrs_anamnesis") or {}
     
@@ -70,6 +70,7 @@ def node_km_disease_explanations(state: MedicalAgentState) -> MedicalAgentState:
         "status": "success",
         "result": explanation
     })
+    log_node_end("km_disease_explanations", f"Disease: {explanation.get('disease_name')} | Staging: {explanation.get('clinical_staging')}")
 
     return {
         **state,

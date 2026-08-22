@@ -1,11 +1,11 @@
 import logging
 from typing import Dict, Any, List
 from app.modules.medical_agent.context.state import MedicalAgentState
-
-logger = logging.getLogger("medical_agent.skills.red_flags")
+from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
 
 def node_km_red_flag_detection(state: MedicalAgentState) -> MedicalAgentState:
     """Identifies clinical red flags, emergency thresholds, and vital sign anomalies."""
+    log_node_start("km_red_flag_detection", state, icon="🚨")
     steps = list(state.get("steps_executed", []))
     simrs_anamnesis = state.get("simrs_anamnesis") or {}
     simrs_labs = state.get("simrs_lab_evaluations") or {}
@@ -69,6 +69,7 @@ def node_km_red_flag_detection(state: MedicalAgentState) -> MedicalAgentState:
         "status": "success",
         "result": red_flags_res
     })
+    log_node_end("km_red_flag_detection", f"Detected {len(detected_flags)} red flags alerts ({', '.join([f['severity'] for f in detected_flags])})")
 
     return {
         **state,

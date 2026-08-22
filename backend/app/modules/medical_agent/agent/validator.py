@@ -2,11 +2,11 @@ import logging
 from typing import Dict, Any, Optional
 from app.modules.medical_agent.context.state import MedicalAgentState
 from app.modules.medical_agent.skills.output_schemas import OutputValidator
-
-logger = logging.getLogger("medical_agent.agent.validator")
+from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
 
 def node_validate_output(state: MedicalAgentState) -> MedicalAgentState:
     """Validates generated clinical text for safety, allergy contraindications, and grounding."""
+    log_node_start("validate_output", state, icon="🛡️")
     query = state.get("user_query", "")
     patient_id = state.get("patient_id")
     final_text = state.get("final_synthesis", "")
@@ -36,6 +36,7 @@ def node_validate_output(state: MedicalAgentState) -> MedicalAgentState:
         "status": "success" if val_report.is_valid else "warning",
         "result": val_report.model_dump()
     })
+    log_node_end("validate_output", f"Score: {val_report.validation_score} | Verdict: {val_report.verdict} | Status: {val_report.status}")
 
     return {
         **state,

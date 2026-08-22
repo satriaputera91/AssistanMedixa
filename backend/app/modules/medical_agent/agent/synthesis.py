@@ -429,6 +429,8 @@ def _generate_fallback_synthesis(
 
 def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
     """Invokes Google Gemini LLM with rich MCP/RAG context or generates validated clinical schema."""
+    from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
+    log_node_start("synthesis", state, icon="🩺")
     query = state.get("user_query", "")
     ehr_data = state.get("ehr_data")
     simrs_profile = state.get("simrs_profile")
@@ -704,6 +706,7 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
         "status": "success",
         "result": "Synthesis generated successfully"
     })
+    log_node_end("synthesis", f"Synthesis Result: {len(final_text)} characters generated")
 
     return {
         **state,

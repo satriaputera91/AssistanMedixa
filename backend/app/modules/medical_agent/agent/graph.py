@@ -4,7 +4,8 @@ from langgraph.graph import StateGraph, END
 
 from app.modules.medical_agent.context.state import MedicalAgentState
 from app.modules.medical_agent.memory.checkpointer import sqlite_checkpointer
-from app.modules.medical_agent.agent.planner import node_planner, _debug_edge, _debug_node_start, _debug_node_end
+from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end, log_edge_transition
+from app.modules.medical_agent.agent.planner import node_planner
 from app.modules.medical_agent.agent.synthesis import node_gemini_synthesis
 from app.modules.medical_agent.agent.validator import node_validate_output
 
@@ -22,7 +23,7 @@ logger = logging.getLogger("medical_agent.agent.graph")
 
 def node_execute_tools(state: MedicalAgentState) -> MedicalAgentState:
     """Executes SIMRS commit transactions, vector RAG search, and clinical literature lookup."""
-    _debug_node_start("tools", state, icon="🛠️")
+    log_node_start("tools", state, icon="🛠️")
     query = state.get("user_query", "")
     query_lower = query.lower()
     patient_id = state.get("patient_id")
@@ -96,8 +97,7 @@ def node_execute_tools(state: MedicalAgentState) -> MedicalAgentState:
         "result": lit_summary[:120] + "..." if lit_summary else "Panduan klinis tersedia."
     })
 
-    _debug_node_end("tools", f"RAG Chunks: {len(rag_chunks)} | Literature: {len(lit_summary)} chars")
-    _debug_edge("tools", "synthesis")
+    log_node_end("tools", f"RAG Chunks: {len(rag_chunks)} | Literature: {len(lit_summary)} chars | SIMRS Commit: {bool(simrs_update_res)}")
     return {
         **state,
         "steps_executed": steps,
@@ -113,9 +113,9 @@ def _route_entry_point(state: MedicalAgentState) -> str:
     workflow_type = state.get("workflow_type")
     audio_bytes = state.get("audio_bytes")
     if workflow_type == "audio" or audio_bytes:
-        _debug_edge("START", "audio_transcription", condition="workflow_type == 'audio'")
+        log_edge_transition("START", "audio_transcription", condition="workflow_type == 'audio'")
         return "audio_transcription"
-    _debug_edge("START", "planner", condition="workflow_type != 'audio' or text query")
+    log_edge_transition("START", "planner", condition="workflow_type != 'audio' or text query")
     return "planner"
 
 
@@ -126,16 +126,16 @@ def _route_planner(state: MedicalAgentState) -> str:
 
     if not patient_id or not patient_id.strip():
         if detected_intent is None:
-            _debug_edge("planner", "synthesis", condition="general consultation: no intent -> direct to synthesis")
+            log_edge_transition("planner", "synthesis", condition="general consultation: no intent -> direct to synthesis")
             return "synthesis"
-        _debug_edge("planner", "tools", condition="general consultation: bypass all SIMRS read nodes -> direct to tools (RAG/KM)")
+        log_edge_transition("planner", "tools", condition="general consultation: bypass all SIMRS read nodes -> direct to tools (RAG/KM)")
         return "tools"
 
     if detected_intent is None:
-        _debug_edge("planner", "synthesis", condition="no clinical intent detected (skip workflow nodes)")
+        log_edge_transition("planner", "synthesis", condition="no clinical intent detected (skip workflow nodes)")
         return "synthesis"
     else:
-        _debug_edge("planner", "fetch_patient_history", condition=f"patient mode ({patient_id}): read SIMRS EMR workflow")
+        log_edge_transition("planner", "fetch_patient_history", condition=f"patient mode ({patient_id}): read SIMRS EMR workflow")
         return "fetch_patient_history"
 
 

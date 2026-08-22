@@ -1,33 +1,11 @@
-import logging
 from typing import Dict, Any, Optional
 from app.modules.medical_agent.context.state import MedicalAgentState
+from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
 from app.core.database import db
-
-logger = logging.getLogger("medical_agent.agent.planner")
-
-def _debug_node_start(node_name: str, state: MedicalAgentState, icon: str = "▶️"):
-    patient_id = state.get("patient_id") or "N/A"
-    patient_name = None
-    if patient_id and patient_id != "N/A":
-        try:
-            p_rec = db.patient_records.get(patient_id)
-            if p_rec:
-                patient_name = p_rec.get("name")
-        except Exception:
-            pass
-    pat_str = f"{patient_id} ({patient_name})" if patient_name else patient_id
-    logger.info(f"{icon} [LANGGRAPH NODE START] >>> {node_name} | Patient: {pat_str} | Query: '{state.get('user_query', '')[:60]}'")
-
-def _debug_node_end(node_name: str, message: str, icon: str = "✅"):
-    logger.info(f"{icon} [LANGGRAPH NODE COMPLETED] <<< {node_name} | {message}")
-
-def _debug_edge(source: str, target: str, condition: str = ""):
-    cond_str = f" (Condition: {condition})" if condition else ""
-    logger.info(f"🔀 [LANGGRAPH EDGE TRANSITION] {source} ──▶ {target}{cond_str}")
 
 def node_planner(state: MedicalAgentState) -> MedicalAgentState:
     """Classifies clinical queries, determines intents, and plans workflow execution paths."""
-    _debug_node_start("planner", state, icon="🧠")
+    log_node_start("planner", state, icon="🧠")
     query = state.get("user_query", "")
     query_lower = query.lower()
     patient_id = state.get("patient_id")
@@ -63,7 +41,7 @@ def node_planner(state: MedicalAgentState) -> MedicalAgentState:
                 "status": "completed",
                 "result": {"detected_intent": detected_intent, "mode": "general_consultation"}
             })
-            _debug_node_end("planner", f"Intent: '{detected_intent}' | Mode: General Consultation (Knowledge Management)")
+            log_node_end("planner", f"Intent: '{detected_intent}' | Mode: General Consultation (Knowledge Management)")
         else:
             steps.append({
                 "step_name": "Agent Intelligence & Conversation Handler",
@@ -71,7 +49,7 @@ def node_planner(state: MedicalAgentState) -> MedicalAgentState:
                 "status": "completed",
                 "result": {"detected_intent": None, "mode": "general_consultation"}
             })
-            _debug_node_end("planner", "Intent: None (General consultation / knowledge)")
+            log_node_end("planner", "Intent: None (General consultation / direct response)")
 
         return {
             **state,
@@ -125,7 +103,7 @@ def node_planner(state: MedicalAgentState) -> MedicalAgentState:
             "status": "completed",
             "result": {"detected_intent": detected_intent, "simrs_mrn": simrs_mrn, "patient_name": patient_name}
         })
-        _debug_node_end("planner", f"Intent: '{detected_intent}' | Patient: {pat_str} | MRN: {simrs_mrn}")
+        log_node_end("planner", f"Intent: '{detected_intent}' | Patient: {pat_str} | MRN: {simrs_mrn}")
     else:
         steps.append({
             "step_name": "Agent Intelligence & Conversation Handler",
@@ -133,7 +111,7 @@ def node_planner(state: MedicalAgentState) -> MedicalAgentState:
             "status": "completed",
             "result": {"detected_intent": None, "patient_name": patient_name}
         })
-        _debug_node_end("planner", f"Intent: None (Direct conversation) | Patient: {pat_str}")
+        log_node_end("planner", f"Intent: None (Direct conversation) | Patient: {pat_str}")
 
     return {
         **state,

@@ -2,11 +2,11 @@ import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 from app.modules.medical_agent.context.state import MedicalAgentState
-
-logger = logging.getLogger("medical_agent.skills.audio_soap")
+from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
 
 def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
     """Simulates or invokes Speech-to-Text (STT) transcription for clinical audio consultation recordings."""
+    log_node_start("audio_transcription", state, icon="🎙️")
     steps = list(state.get("steps_executed", []))
     audio_bytes = state.get("audio_bytes")
     audio_filename = state.get("audio_filename", "consultation_audio.wav")
@@ -26,6 +26,7 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
         "status": "success",
         "result": {"transcript_length": len(transcript), "audio_file": audio_filename}
     })
+    log_node_end("audio_transcription", f"Transcribed audio file '{audio_filename}' ({len(transcript)} chars)")
 
     return {
         **state,
@@ -35,6 +36,7 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
 
 def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
     """Converts transcribed consultation audio into structured S-O-A-P / CPPT notes."""
+    log_node_start("audio_soap_summary", state, icon="📋")
     steps = list(state.get("steps_executed", []))
     transcript = state.get("audio_transcript", "")
     patient_id = state.get("patient_id", "P-10492")
@@ -52,6 +54,7 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
         "status": "success",
         "result": soap_note
     })
+    log_node_end("audio_soap_summary", "Extracted S/O/A/P structured note from audio dialogue")
 
     return {
         **state,

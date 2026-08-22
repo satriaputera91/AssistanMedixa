@@ -1,11 +1,11 @@
 import logging
 from typing import Dict, Any, List
 from app.modules.medical_agent.context.state import MedicalAgentState
-
-logger = logging.getLogger("medical_agent.skills.pharmacology")
+from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
 
 def node_km_medication_recommendation(state: MedicalAgentState) -> MedicalAgentState:
     """Provides guideline-directed first-line drug therapy recommendations and renal dosing."""
+    log_node_start("km_medication_recommendation", state, icon="💊")
     steps = list(state.get("steps_executed", []))
     ehr_data = state.get("ehr_data") or {}
     simrs_anamnesis = state.get("simrs_anamnesis") or {}
@@ -108,6 +108,7 @@ def node_km_medication_recommendation(state: MedicalAgentState) -> MedicalAgentS
         "status": "success",
         "result": med_rec
     })
+    log_node_end("km_medication_recommendation", f"Regimens: {len(med_rec.get('recommended_regimens', []))} drugs recommended for {med_rec.get('disease')}")
 
     return {
         **state,
@@ -117,6 +118,7 @@ def node_km_medication_recommendation(state: MedicalAgentState) -> MedicalAgentS
 
 def node_patient_drug_safety(state: MedicalAgentState) -> MedicalAgentState:
     """Performs drug-drug interaction (DDI) screening, allergy cross-reactivity, and renal clearance safety."""
+    log_node_start("patient_drug_safety", state, icon="🛡️")
     steps = list(state.get("steps_executed", []))
     ehr_data = state.get("ehr_data") or {}
     simrs_anamnesis = state.get("simrs_anamnesis") or {}
@@ -157,6 +159,7 @@ def node_patient_drug_safety(state: MedicalAgentState) -> MedicalAgentState:
         "status": "success",
         "result": drug_safety
     })
+    log_node_end("patient_drug_safety", f"Allergy Warnings: {len(screening_findings)} | DDI Rules Checked: {len(drug_safety['ddi_screening'])}")
 
     return {
         **state,
