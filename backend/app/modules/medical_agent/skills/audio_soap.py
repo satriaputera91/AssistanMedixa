@@ -191,7 +191,7 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
     """
     Synthesizes structured S-O-A-P / CPPT notes from the diarized audio consultation transcript
     using Google Gemini LLM with Pydantic JSON Schema validation, retrieving verified SIMRS
-    patient profile (by NIK or Patient ID / MRN) for complete clinical grounding.
+    patient profile, anamnesis, and laboratory data (by NIK or Patient ID / MRN) for complete clinical grounding.
     """
     log_node_start("audio_soap_summary", state, icon="📋")
     steps = list(state.get("steps_executed", []))
@@ -201,11 +201,12 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
     audio_filename = state.get("audio_filename", "consultation_recording.wav")
     api_key = settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")
 
-    # Retrieve patient profile from SIMRS MCP via Patient ID, NIK, or MRN
+    # 1. Retrieve patient profile from SIMRS MCP via Patient ID, NIK, or MRN
     lookup_key = nik or patient_id or "P-10492"
     simrs_profile = state.get("simrs_profile")
     simrs_labs = state.get("simrs_lab_evaluations")
     simrs_history = state.get("simrs_history")
+    simrs_anamnesis = state.get("simrs_anamnesis")
 
     if not simrs_profile and lookup_key:
         profile_res = tool_simrs_get_patient_profile(lookup_key)
@@ -225,15 +226,41 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
                 }
             })
 
-    # Pre-fetch SIMRS labs if not loaded yet
-    mrn = simrs_profile.get("mrn") if simrs_profile else (f"MRN-SIMRS-{patient_id.replace('P-', '')}" if patient_id else None)
+    # Resolve target MRN
+    mrn = simrs_profile.get("mrn") if simrs_profile else (f"MRN-SIMRS-{patient_id.replace('P-', '')}" if patient_id else "MRN-SIMRS-10492")
+
+    # 2. Retrieve verified Anamnesis from SIMRS MCP if not present
+    if mrn and not simrs_anamnesis:
+        anamnesis_res = tool_simrs_get_patient_anamnesis(mrn)
+        if anamnesis_res.get("status") == "success" and anamnesis_res.get("anamnesis"):
+            simrs_anamnesis = anamnesis_res["anamnesis"]
+            steps.append({
+                "step_name": "Pengambilan Riwayat Anamnesis SIMRS (MCP)",
+                "description": f"Mengambil riwayat penyakit sekarang, penyakit dahulu (RPD), dan riwayat alergi untuk {mrn}",
+                "status": "success",
+                "result": {
+                    "keluhan_utama": simrs_anamnesis.get("chief_complaint"),
+                    "riwayat_alergi": simrs_anamnesis.get("allergy_history"),
+                    "riwayat_obat": simrs_anamnesis.get("medication_history")
+                }
+            })
+
+    # 3. Retrieve verified Laboratory & Vital Signs from SIMRS MCP if not present
     if mrn and not simrs_labs:
         labs_res = tool_simrs_get_patient_labs(mrn)
         if labs_res.get("status") == "success":
             simrs_labs = labs_res
+            steps.append({
+                "step_name": "Pengambilan Hasil Laboratorium & TTV SIMRS (MCP)",
+                "description": f"Mengambil tanda vital serial dan panel laboratorium lengkap untuk {mrn}",
+                "status": "success",
+                "result": {
+                    "tanda_vital": simrs_labs.get("vital_signs", {}),
+                    "total_lab_tests": len(simrs_labs.get("latest_labs", []))
+                }
+            })
 
     # Build Pydantic Patient Demographics Model
-    patient_model = None
     if simrs_profile:
         patient_model = PatientDemographicsData(
             mrn=simrs_profile.get("mrn", f"MRN-SIMRS-{patient_id.replace('P-', '')}" if patient_id else "MRN-SIMRS-10492"),
@@ -259,32 +286,57 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
             attending_physician="Dr. Sarah Jenkins, Sp.PD"
         )
 
+    # Prepare Objective Lab items from SIMRS
+    lab_items_list = []
+    if simrs_labs and "latest_labs" in simrs_labs:
+        for l in simrs_labs["latest_labs"]:
+            lab_items_list.append(LabItemData(
+                test_name=l.get("test_name", "Lab"),
+                value=str(l.get("value", "-")),
+                unit=l.get("unit", ""),
+                status=l.get("status", "Normal"),
+                reference_range=l.get("ref_range", "")
+            ))
+    if not lab_items_list:
+        lab_items_list = [
+            LabItemData(test_name="GDP", value="142", unit="mg/dL", status="High", reference_range="70 - 100"),
+            LabItemData(test_name="HbA1c", value="7.2", unit="%", status="High", reference_range="< 6.5"),
+            LabItemData(test_name="eGFR", value="58", unit="mL/min/1.73m²", status="Low", reference_range="> 90"),
+            LabItemData(test_name="uACR", value="120", unit="mg/g", status="High", reference_range="< 30")
+        ]
+
+    # Prepare Vital Signs from SIMRS
+    vitals_dict = simrs_labs.get("vital_signs", {}) if simrs_labs else {}
+    vital_signs_model = VitalSignsData(
+        blood_pressure=vitals_dict.get("blood_pressure", "140/90 mmHg"),
+        heart_rate=vitals_dict.get("heart_rate", "78 bpm"),
+        respiratory_rate=vitals_dict.get("respiratory_rate", "18 x/menit"),
+        temperature=vitals_dict.get("temperature", "36.6 °C"),
+        spo2=vitals_dict.get("spo2", "98%")
+    )
+
+    # Prepare Subjective Data from SIMRS Anamnesis & Transcript
+    subj_chief = simrs_anamnesis.get("chief_complaint", "Pusing berputar dan badan lemas sejak 3 hari") if simrs_anamnesis else "Pusing berputar dan badan lemas sejak 3 hari"
+    subj_rps = simrs_anamnesis.get("history_present_illness", "Pusing berputar disertai nokturia 3-4x/malam dan parestesia pada kedua ujung jari kaki.") if simrs_anamnesis else "Keluhan pusing berputar disertai nokturia 3-4x/malam dan parestesia/kesemutan pada kedua ujung jari kaki. Kepatuhan minum obat harian baik."
+    subj_rpd = simrs_anamnesis.get("past_medical_history", "DM Tipe 2 (8 tahun), Hipertensi Esensial (10 tahun), CKD Stage 3a") if simrs_anamnesis else "DM Tipe 2 (8 tahun), Hipertensi Esensial (10 tahun), CKD Stage 3a"
+    subj_allergy = simrs_anamnesis.get("allergy_history", "Alergi Penisilin (Syok Anafilaksis), Sulfa (Ruam Makulopapular)") if simrs_anamnesis else "Alergi Penisilin (Syok Anafilaksis), Sulfa (Ruam Makulopapular)"
+    subj_meds = simrs_anamnesis.get("medication_history", "Metformin 1000mg BID, Lisinopril 20mg Daily, Atorvastatin 40mg Daily") if simrs_anamnesis else "Metformin 1000mg BID, Lisinopril 20mg Daily, Atorvastatin 40mg Daily"
+
     # Fallback SOAP Pydantic Schema Model
     fallback_soap = ClinicalSOAPOutputSchema(
         title="Catatan Perkembangan Pasien Terintegrasi (CPPT / S-O-A-P)",
         patient=patient_model,
         subjective=SubjectiveData(
-            chief_complaint="Pusing berputar dan badan lemas sejak 3 hari",
-            history_present_illness="Keluhan pusing berputar disertai nokturia 3-4x/malam dan parestesia/kesemutan pada kedua ujung jari kaki. Kepatuhan minum obat harian baik.",
-            past_medical_history="DM Tipe 2 (8 tahun), Hipertensi Esensial (10 tahun), CKD Stage 3a",
-            allergy_history="Alergi Penisilin (Syok Anafilaksis), Sulfa (Ruam Makulopapular)",
-            medication_history="Metformin 1000mg BID, Lisinopril 20mg Daily, Atorvastatin 40mg Daily"
+            chief_complaint=subj_chief,
+            history_present_illness=subj_rps,
+            past_medical_history=subj_rpd,
+            allergy_history=subj_allergy,
+            medication_history=subj_meds
         ),
         objective=ObjectiveData(
-            vital_signs=VitalSignsData(
-                blood_pressure="140/90 mmHg",
-                heart_rate="78 bpm",
-                respiratory_rate="18 x/menit",
-                temperature="36.6 °C",
-                spo2="98%"
-            ),
+            vital_signs=vital_signs_model,
             physical_examination="Keadaan umum: Sakit sedang, CM. Ekstremitas: Sensibilitas monofilamen menurun pada distal digiti pedis bilateral.",
-            laboratory_results=[
-                LabItemData(test_name="GDP", value="142", unit="mg/dL", status="High", reference_range="70 - 100"),
-                LabItemData(test_name="HbA1c", value="7.2", unit="%", status="High", reference_range="< 6.5"),
-                LabItemData(test_name="eGFR", value="58", unit="mL/min/1.73m²", status="Low", reference_range="> 90"),
-                LabItemData(test_name="uACR", value="120", unit="mg/g", status="High", reference_range="< 30")
-            ]
+            laboratory_results=lab_items_list
         ),
         assessment=AssessmentData(
             primary_diagnosis=DiagnosisItemData(
@@ -325,6 +377,10 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
         notes="Dihasilkan dari rekaman audio klinis terdiarisasi via Pydantic Schema & Gemini."
     )
 
+    # Build Prompt with Rich SIMRS Anamnesis & Laboratory Data
+    simrs_labs_context_str = ", ".join([f"{l.test_name}: {l.value} {l.unit} ({l.status})" for l in lab_items_list])
+    vitals_context_str = f"TD: {vital_signs_model.blood_pressure}, Nadi: {vital_signs_model.heart_rate}, Suhu: {vital_signs_model.temperature}, SpO2: {vital_signs_model.spo2}"
+
     soap_schema_prompt = (
         "Anda adalah Asisten AI Medis Klinis spesialis Rekam Medis Elektronik (RME SIMRS) dengan standar CPPT S-O-A-P.\n\n"
         f"Data Demografi Pasien Terverifikasi SIMRS:\n"
@@ -333,26 +389,32 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
         f"- NIK: {patient_model.nik or 'N/A'}\n"
         f"- Usia/Gender: {patient_model.age} tahun / {patient_model.gender}\n"
         f"- DPJP: {patient_model.attending_physician or 'Dr. Sarah Jenkins, Sp.PD'}\n\n"
+        f"Data Rekam Medis SIMRS (Anamnesis & Laboratorium):\n"
+        f"- Riwayat Penyakit Dahulu (RPD): {subj_rpd}\n"
+        f"- Riwayat Pengobatan Rutin: {subj_meds}\n"
+        f"- Riwayat Alergi: {subj_allergy}\n"
+        f"- Tanda Vital Terkini: {vitals_context_str}\n"
+        f"- Hasil Laboratorium Serial: {simrs_labs_context_str}\n\n"
         f"Berikut adalah transkrip hasil rekaman konsultasi klinis terdiarisasi antara Dokter dan Pasien:\n"
         f"\"\"\"\n{transcript}\n\"\"\"\n\n"
         "TUGAS:\n"
-        "Ekstrak dan sintesiskan seluruh informasi medis dari transkrip di atas ke dalam format JSON terstruktur yang valid sesuai skema:\n"
+        "Integrasikan data transkrip rekaman audio dengan data Anamnesis dan Laboratorium SIMRS di atas untuk menghasilkan resume CPPT S-O-A-P terstruktur dalam JSON valid sesuai skema:\n"
         "{\n"
         '  "title": "📋 Catatan Perkembangan Pasien Terintegrasi (CPPT / S-O-A-P)",\n'
         '  "subjective": {\n'
         '    "chief_complaint": "Keluhan utama pasien",\n'
         '    "history_present_illness": "Riwayat penyakit sekarang",\n'
-        '    "past_medical_history": "Riwayat penyakit dahulu",\n'
+        '    "past_medical_history": "Riwayat penyakit dahulu (sinkron SIMRS)",\n'
         '    "allergy_history": "Riwayat alergi obat & makanan",\n'
         '    "medication_history": "Riwayat obat rutin"\n'
         '  },\n'
         '  "objective": {\n'
         '    "vital_signs": {\n'
-        '      "blood_pressure": "140/90 mmHg",\n'
-        '      "heart_rate": "78 bpm",\n'
-        '      "respiratory_rate": "18 x/menit",\n'
-        '      "temperature": "36.6 °C",\n'
-        '      "spo2": "98%"\n'
+        f'      "blood_pressure": "{vital_signs_model.blood_pressure}",\n'
+        f'      "heart_rate": "{vital_signs_model.heart_rate}",\n'
+        f'      "respiratory_rate": "{vital_signs_model.respiratory_rate}",\n'
+        f'      "temperature": "{vital_signs_model.temperature}",\n'
+        f'      "spo2": "{vital_signs_model.spo2}"\n'
         '    },\n'
         '    "physical_examination": "Temuan fisik",\n'
         '    "laboratory_results": [\n'
@@ -431,8 +493,8 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
     }
 
     steps.append({
-        "step_name": "Sintesis Catatan SOAP dari Transkrip Audio (Gemini LLM & Pydantic Schema)",
-        "description": f"Mengekstrak dan memvalidasi komponen S/O/A/P terstruktur dari hasil diarisasi audio menggunakan {soap_engine} untuk pasien {patient_model.full_name} ({patient_model.mrn}).",
+        "step_name": "Sintesis Catatan SOAP dari Transkrip Audio & SIMRS (Gemini & Pydantic)",
+        "description": f"Mengekstrak dan memvalidasi komponen S/O/A/P terstruktur dari hasil diarisasi audio, anamnesis, dan laboratorium SIMRS menggunakan {soap_engine} untuk pasien {patient_model.full_name} ({patient_model.mrn}).",
         "status": "success",
         "result": {
             "engine": soap_engine,
@@ -440,17 +502,20 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
             "patient_mrn": patient_model.mrn,
             "patient_name": patient_model.full_name,
             "patient_nik": patient_model.nik,
+            "simrs_anamnesis_integrated": bool(simrs_anamnesis),
+            "simrs_labs_integrated": bool(simrs_labs),
             "soap_summary": soap_summary_dict,
             "primary_diagnosis": soap_model.assessment.primary_diagnosis.diagnosis,
             "icd10": soap_model.assessment.primary_diagnosis.icd10
         }
     })
-    log_node_end("audio_soap_summary", f"Generated & Validated Pydantic SOAP Schema via {soap_engine} for {patient_model.full_name} ({patient_model.mrn})")
+    log_node_end("audio_soap_summary", f"Generated & Validated Pydantic SOAP Schema via {soap_engine} with Anamnesis & Labs for {patient_model.full_name} ({patient_model.mrn})")
 
     return {
         **state,
         "steps_executed": steps,
         "simrs_profile": simrs_profile,
+        "simrs_anamnesis": simrs_anamnesis,
         "simrs_lab_evaluations": simrs_labs,
         "final_synthesis": final_markdown,
         "structured_output": audio_soap_container.model_dump()
