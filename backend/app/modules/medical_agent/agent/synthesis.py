@@ -160,6 +160,24 @@ def _generate_fallback_synthesis(
         
         return "\n".join(lines), None
 
+    if is_anamnesis_only:
+        lines = []
+        lines.append("## 📝 Data Anamnesis Pasien (SIMRS MCP)\n")
+        
+        if simrs_anamnesis:
+            lines.append("| Komponen Anamnesis | Keterangan Klinis Pasien |")
+            lines.append("| :--- | :--- |")
+            lines.append(f"| **Keluhan Utama** | {simrs_anamnesis.get('chief_complaint', '-')} |")
+            lines.append(f"| **Riwayat Penyakit Sekarang (RPS)** | {simrs_anamnesis.get('history_present_illness', '-')} |")
+            lines.append(f"| **Riwayat Penyakit Dahulu (RPD)** | {simrs_anamnesis.get('past_medical_history', '-')} |")
+            lines.append(f"| **Riwayat Pengobatan Rutin** | {simrs_anamnesis.get('medication_history', '-')} |")
+            lines.append(f"| **Riwayat Alergi Obat / Makanan** | {simrs_anamnesis.get('allergy_history', 'Tidak ada riwayat alergi yang tercatat di SIMRS (NKDA)')} |\n")
+        else:
+            lines.append("*Data anamnesis klinis pasien tidak ditemukan di basis data SIMRS.*\n")
+            
+        lines.append("> ⚠️ **Disclaimer Medis**: Data anamnesis ini diambil langsung dari modul RME SIMRS untuk mendukung proses evaluasi klinis dan pertimbangan diagnostik oleh Dokter Penanggung Jawab Pasien (DPJP).")
+        return "\n".join(lines), None
+
     if not any([is_patient_history_only, is_anamnesis_only, is_labs_only, is_diagnosis_only, is_general_full_eval, is_cppt_commit, is_general_knowledge_query]):
         query_strip = query_lower.strip()
         if any(g in query_strip for g in ["halo", "hai", "selamat", "pagi", "siang", "sore", "malam", "assalam", "hi", "tes", "test", "bantu", "siapa"]):
@@ -488,6 +506,35 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
             "   - Judul: `## 📋 Informasi Profil & Demografi Pasien (SIMRS MCP)`\n"
             "   - Tabel Parameter Demografi (Nama Pasien, No. Rekam Medis (MRN), NIK, Usia / Gender, Golongan Darah, Status Jaminan (BPJS), Poliklinik Aktif, DPJP)\n"
             "   - Disclaimer singkat di akhir."
+        )
+
+    elif is_anamnesis_only:
+        prompt_context = f"Doctor Query: {query}\n\n"
+        if simrs_anamnesis:
+            prompt_context += (
+                f"=== DATA ANAMNESIS PASIEN DARI MODUL RME SIMRS (MCP) ===\n"
+                f"Status: Ditemukan di SIMRS\n"
+                f"Keluhan Utama (Chief Complaint): {simrs_anamnesis.get('chief_complaint', '-')}\n"
+                f"Riwayat Penyakit Sekarang (RPS): {simrs_anamnesis.get('history_present_illness', '-')}\n"
+                f"Riwayat Penyakit Dahulu (RPD): {simrs_anamnesis.get('past_medical_history', '-')}\n"
+                f"Riwayat Pengobatan Rutin: {simrs_anamnesis.get('medication_history', '-')}\n"
+                f"Riwayat Alergi: {simrs_anamnesis.get('allergy_history', 'Tidak ada riwayat alergi tercatat (NKDA)')}\n\n"
+            )
+        else:
+            prompt_context += (
+                f"=== DATA ANAMNESIS PASIEN DARI MODUL RME SIMRS (MCP) ===\n"
+                f"Status: Data anamnesis klinis pasien TIDAK DITEMUKAN di SIMRS.\n\n"
+            )
+
+        system_instruction = (
+            "Anda adalah Asisten AI Medis Klinis (Medical Co-Pilot) profesional yang terintegrasi dengan SIMRS melalui Model Context Protocol (MCP).\n"
+            "PENTING & INSTRUKSI GROUNDING KETAT:\n"
+            "1. Dokter meminta Informasi Data Anamnesis Pasien (Keluhan Utama, Riwayat Penyakit Sekarang/RPS, Riwayat Penyakit Dahulu/RPD, Riwayat Pengobatan, Riwayat Alergi).\n"
+            "2. ATURAN ANTI-HALUSINASI MUTLAK: Sajikan HANYA data anamnesis yang tercantum di atas. Jangan mengarang data dan JANGAN menampilkan data/tabel laboratorium, tanda vital, atau rekomendasi obat/terapi jika tidak diminta.\n"
+            "3. Format sajian menggunakan Markdown terstruktur dan tabel rapi:\n"
+            "   - Judul: `## 📝 Data Anamnesis Pasien (SIMRS MCP)`\n"
+            "   - Tabel Komponen Anamnesis (Keluhan Utama, RPS, RPD, Riwayat Pengobatan, Riwayat Alergi)\n"
+            "   - Disclaimer singkat di bagian akhir."
         )
 
     else:

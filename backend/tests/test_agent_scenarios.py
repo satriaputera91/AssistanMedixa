@@ -84,11 +84,11 @@ class TestMedicalAgentScenarios(unittest.TestCase):
         self.assertTrue(any(k in res["final_synthesis"] for k in ["Eleanor Vance", "MRN-SIMRS-10492", "Profil", "Demografi"]))
 
     def test_03_patient_anamnesis_retrieval_scenario(self):
-        """Scenario 3: FAQ 2 - Retrieve patient clinical anamnesis (Keluhan Utama, RPS, RPD, RPK)."""
+        """Scenario 3: FAQ 2 - Retrieve patient clinical anamnesis from SIMRS."""
         state: MedicalAgentState = {
-            "messages": [{"role": "user", "content": "Ambil data anamnesis klinis pasien, keluhan utama, dan RPS"}],
+            "messages": [{"role": "user", "content": "Tarik data anamnesis dari modul RME SIMRS"}],
             "patient_id": "P-30124",
-            "user_query": "Ambil data anamnesis klinis pasien, keluhan utama, dan RPS",
+            "user_query": "Tarik data anamnesis dari modul RME SIMRS",
             "workflow_type": "text",
             "steps_executed": [],
             "final_synthesis": ""
@@ -100,6 +100,7 @@ class TestMedicalAgentScenarios(unittest.TestCase):
         self.assertIn("chief_complaint", res["simrs_anamnesis"])
         self.assertIn("ulu hati", res["simrs_anamnesis"]["chief_complaint"].lower())
         self.assertTrue(any("2. Ambil Data Anamnesis SIMRS" in s["step_name"] for s in res["steps_executed"]))
+        self.assertTrue(any(k in res["final_synthesis"] for k in ["Anamnesis", "Keluhan Utama", "ulu hati"]))
 
     def test_04_patient_labs_and_vitals_evaluation_scenario(self):
         """Scenario 4: FAQ 3 - Evaluate serial laboratory values and vital signs via SIMRS MCP."""
