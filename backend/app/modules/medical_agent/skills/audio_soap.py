@@ -36,7 +36,7 @@ except ImportError:
 
 
 def _clean_json_string(raw_text: str) -> str:
-    """Strips Markdown fences and extracts raw JSON string."""
+    """Strips Markdown fences and extracts clean JSON string."""
     text = raw_text.strip()
     if text.startswith("```json"):
         text = text[7:]
@@ -183,12 +183,12 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
     audio_filename = state.get("audio_filename", "consultation_recording.wav")
     api_key = settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")
 
-    # Retrieve patient model if available
+    # Retrieve patient model if available from state / SIMRS
     simrs_profile = state.get("simrs_profile")
     patient_model = None
     if simrs_profile:
         patient_model = PatientDemographicsData(
-            mrn=simrs_profile.get("mrn", "MRN-SIMRS-10492"),
+            mrn=simrs_profile.get("mrn", f"MRN-SIMRS-{patient_id.replace('P-', '')}"),
             full_name=simrs_profile.get("full_name", "Eleanor Vance"),
             nik=simrs_profile.get("nik", ""),
             bpjs_card_no=simrs_profile.get("bpjs_card_no", ""),
@@ -200,7 +200,7 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
         )
     else:
         patient_model = PatientDemographicsData(
-            mrn="MRN-SIMRS-10492",
+            mrn=f"MRN-SIMRS-{patient_id.replace('P-', '')}" if patient_id else "MRN-SIMRS-10492",
             full_name="Eleanor Vance",
             age=58,
             gender="Female",
@@ -275,20 +275,58 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
     )
 
     soap_schema_prompt = (
-        "Anda adalah Asisten AI Medis Klinis spesialis Rekam Medis Elektronik (RME SIMRS).\n\n"
-        f"Berikut adalah transkrip hasil rekaman konsultasi klinis terdiarisasi:\n"
+        "Anda adalah Asisten AI Medis Klinis spesialis Rekam Medis Elektronik (RME SIMRS) dengan standar CPPT S-O-A-P.\n\n"
+        f"Berikut adalah transkrip hasil rekaman konsultasi klinis terdiarisasi antara Dokter dan Pasien:\n"
         f"\"\"\"\n{transcript}\n\"\"\"\n\n"
         "TUGAS:\n"
-        "Ekstrak dan sintesiskan percakapan di atas menjadi Catatan Perkembangan Pasien Terintegrasi (CPPT / S-O-A-P) terstruktur dalam JSON murni yang memetakan:\n"
-        "- subjective (chief_complaint, history_present_illness, past_medical_history, allergy_history, medication_history)\n"
-        "- objective (vital_signs, physical_examination, laboratory_results)\n"
-        "- assessment (primary_diagnosis, differential_diagnoses, clinical_reasoning)\n"
-        "- plan (medications, diagnostic_workup, clinical_procedures, patient_education, follow_up)\n"
-        "- red_flags (title, severity, action_required)\n\n"
-        "Kembalikan HANYA JSON valid tanpa teks lain."
+        "Ekstrak dan sintesiskan seluruh informasi medis dari transkrip di atas ke dalam format JSON terstruktur yang valid sesuai skema:\n"
+        "{\n"
+        '  "title": "📋 Catatan Perkembangan Pasien Terintegrasi (CPPT / S-O-A-P)",\n'
+        '  "subjective": {\n'
+        '    "chief_complaint": "Keluhan utama pasien",\n'
+        '    "history_present_illness": "Riwayat penyakit sekarang",\n'
+        '    "past_medical_history": "Riwayat penyakit dahulu",\n'
+        '    "allergy_history": "Riwayat alergi obat & makanan",\n'
+        '    "medication_history": "Riwayat obat rutin"\n'
+        '  },\n'
+        '  "objective": {\n'
+        '    "vital_signs": {\n'
+        '      "blood_pressure": "140/90 mmHg",\n'
+        '      "heart_rate": "78 bpm",\n'
+        '      "respiratory_rate": "18 x/menit",\n'
+        '      "temperature": "36.6 °C",\n'
+        '      "spo2": "98%"\n'
+        '    },\n'
+        '    "physical_examination": "Temuan fisik",\n'
+        '    "laboratory_results": [\n'
+        '      {"test_name": "GDP", "value": "142", "unit": "mg/dL", "status": "High", "reference_range": "70-100"}\n'
+        '    ]\n'
+        '  },\n'
+        '  "assessment": {\n'
+        '    "primary_diagnosis": {"diagnosis": "...", "icd10": "...", "confidence": 0.95, "notes": "..."},\n'
+        '    "differential_diagnoses": [{"diagnosis": "...", "icd10": "...", "confidence": 0.85, "notes": "..."}],\n'
+        '    "clinical_reasoning": "..."\n'
+        '  },\n'
+        '  "plan": {\n'
+        '    "medications": [\n'
+        '      {"drug_name": "...", "dosage": "...", "frequency": "...", "route": "Oral", "duration": "...", "notes": "..."}\n'
+        '    ],\n'
+        '    "diagnostic_workup": ["..."],\n'
+        '    "clinical_procedures": ["..."],\n'
+        '    "patient_education": ["..."],\n'
+        '    "follow_up": "..."\n'
+        '  },\n'
+        '  "red_flags": [\n'
+        '    {"title": "...", "severity": "Warning", "action_required": "..."}\n'
+        '  ],\n'
+        '  "drug_safety_status": "Aman",\n'
+        '  "notes": "Sintesis SOAP otomatis via Gemini."\n'
+        "}\n\n"
+        "Kembalikan HANYA JSON valid tanpa teks atau penjelasan tambahan."
     )
 
     soap_model: ClinicalSOAPOutputSchema = fallback_soap
+    soap_engine: str = "Pydantic Fallback Generator"
 
     if api_key and HAS_GOOGLE_GENAI_SDK and len(transcript) > 50:
         try:
@@ -306,10 +344,11 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
                 soap_dict = json.loads(cleaned_json)
                 soap_dict["patient"] = patient_model.model_dump() if patient_model else None
                 soap_model = ClinicalSOAPOutputSchema.model_validate(soap_dict)
+                soap_engine = f"Google Gemini ({settings.GEMINI_MODEL_NAME}) + Pydantic Schema"
         except Exception as e:
             logger.warning(f"Gemini SOAP JSON extraction encountered error: {e}. Utilizing validated Pydantic model.")
 
-    # Reconstruct Diarization Model if stored
+    # Reconstruct Diarization Model if stored in state
     diarization_model = None
     if isinstance(state.get("structured_output"), dict) and "utterances" in state["structured_output"]:
         try:
@@ -335,17 +374,18 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
     }
 
     steps.append({
-        "step_name": "Sintesis Catatan SOAP dari Transkrip Audio (Pydantic Schema)",
-        "description": "Mengekstrak dan memvalidasi komponen S/O/A/P terstruktur ke dalam Pydantic Schema sebelum konversi ke Markdown.",
+        "step_name": "Sintesis Catatan SOAP dari Transkrip Audio (Gemini LLM & Pydantic Schema)",
+        "description": f"Mengekstrak dan memvalidasi komponen S/O/A/P terstruktur dari hasil diarisasi audio menggunakan {soap_engine}.",
         "status": "success",
         "result": {
+            "engine": soap_engine,
             "pydantic_schema_valid": True,
             "soap_summary": soap_summary_dict,
             "primary_diagnosis": soap_model.assessment.primary_diagnosis.diagnosis,
             "icd10": soap_model.assessment.primary_diagnosis.icd10
         }
     })
-    log_node_end("audio_soap_summary", f"Generated & Validated Pydantic SOAP Schema for {soap_model.assessment.primary_diagnosis.diagnosis}")
+    log_node_end("audio_soap_summary", f"Generated & Validated Pydantic SOAP Schema via {soap_engine} for {soap_model.assessment.primary_diagnosis.diagnosis}")
 
     return {
         **state,
