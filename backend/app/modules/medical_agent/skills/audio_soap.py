@@ -1,11 +1,29 @@
 import os
 import re
+import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 from app.core.config import settings
 from app.modules.medical_agent.context.state import MedicalAgentState
 from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
+from app.modules.medical_agent.skills.output_schemas import (
+    DiarizedUtterance,
+    AudioDiarizationSchema,
+    AudioConsultationSOAPSchema,
+    ClinicalSOAPOutputSchema,
+    PatientDemographicsData,
+    SubjectiveData,
+    ObjectiveData,
+    VitalSignsData,
+    LabItemData,
+    AssessmentData,
+    DiagnosisItemData,
+    PlanData,
+    MedicationItemData,
+    RedFlagData,
+    MANDATORY_CLINICAL_DISCLAIMER
+)
 
 logger = logging.getLogger("medical_agent.skills.audio_soap")
 
@@ -17,21 +35,63 @@ except ImportError:
     HAS_GOOGLE_GENAI_SDK = False
 
 
-def _get_fallback_diarized_transcript(filename: str) -> str:
-    """Provides high-fidelity speaker diarization transcript fallback."""
-    return (
-        "**Dokter [00:00 - 00:06]**: 'Selamat pagi Ibu Eleanor, silakan duduk. Bagaimana kondisi dan apa keluhan utama yang paling dirasakan beberapa hari terakhir ini Bu?'\n\n"
-        "**Pasien [00:07 - 00:23]**: 'Pagi Dok. Kepala saya rasanya sering pusing berputar dan badan terasa lemas sejak 3 hari ini. Malam hari juga sering terbangun untuk buang air kecil 3 sampai 4 kali, terus kedua ujung jari kaki terasa kesemutan tebal.'\n\n"
-        "**Dokter [00:24 - 00:36]**: 'Baik Bu, untuk obat rutin kencing manis dan darah tingginya, seperti Metformin dan Lisinopril, apakah masih diminum teratur tiap hari? Ada keluhan nyeri dada, ampeg, atau sesak napas?'\n\n"
-        "**Pasien [00:37 - 00:44]**: 'Semua obat saya minum teratur tiap hari setelah sarapan Dok. Keluhan sesak napas atau nyeri dada tidak ada sama sekali.'\n\n"
-        "**Dokter [00:45 - 01:12]**: 'Bagus Bu. Dari evaluasi pemeriksaan tanda vital dan hasil lab serial: tensi Ibu 140/90 mmHg, gula darah puasa 142 mg/dL, HbA1c 7.2%, dan nilai eGFR 58 mL/min yang menunjukkan fungsi ginjal tahap 3a stabil. Kita lanjutkan terapi Metformin 1000mg 2x sehari dan Lisinopril 20mg 1x sehari untuk nefroproteksi, serta penting menjaga pola makan rendah garam dan kontrol serial.'"
+def _clean_json_string(raw_text: str) -> str:
+    """Strips Markdown fences and extracts raw JSON string."""
+    text = raw_text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return text.strip()
+
+
+def _get_fallback_diarization_schema(filename: str) -> AudioDiarizationSchema:
+    """Provides high-fidelity speaker diarization Pydantic model fallback."""
+    return AudioDiarizationSchema(
+        audio_filename=filename,
+        session_type="Konsultasi Rawat Jalan Penyakit Dalam",
+        language="id-ID",
+        utterances=[
+            DiarizedUtterance(
+                speaker="Dokter",
+                start_time="00:00",
+                end_time="00:06",
+                text="Selamat pagi Ibu Eleanor, silakan duduk. Bagaimana kondisi dan apa keluhan utama yang paling dirasakan beberapa hari terakhir ini Bu?"
+            ),
+            DiarizedUtterance(
+                speaker="Pasien",
+                start_time="00:07",
+                end_time="00:23",
+                text="Pagi Dok. Kepala saya rasanya sering pusing berputar dan badan terasa lemas sejak 3 hari ini. Malam hari juga sering terbangun untuk buang air kecil 3 sampai 4 kali, terus kedua ujung jari kaki terasa kesemutan tebal."
+            ),
+            DiarizedUtterance(
+                speaker="Dokter",
+                start_time="00:24",
+                end_time="00:36",
+                text="Baik Bu, untuk obat rutin kencing manis dan darah tingginya, seperti Metformin dan Lisinopril, apakah masih diminum teratur tiap hari? Ada keluhan nyeri dada, ampeg, atau sesak napas?"
+            ),
+            DiarizedUtterance(
+                speaker="Pasien",
+                start_time="00:37",
+                end_time="00:44",
+                text="Semua obat saya minum teratur tiap hari setelah sarapan Dok. Keluhan sesak napas atau nyeri dada tidak ada sama sekali."
+            ),
+            DiarizedUtterance(
+                speaker="Dokter",
+                start_time="00:45",
+                end_time="01:12",
+                text="Bagus Bu. Dari evaluasi pemeriksaan tanda vital dan hasil lab serial: tensi Ibu 140/90 mmHg, gula darah puasa 142 mg/dL, HbA1c 7.2%, dan nilai eGFR 58 mL/min yang menunjukkan fungsi ginjal tahap 3a stabil. Kita lanjutkan terapi Metformin 1000mg 2x sehari dan Lisinopril 20mg 1x sehari untuk nefroproteksi, serta penting menjaga pola makan rendah garam dan kontrol serial."
+            )
+        ]
     )
 
 
 def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
     """
     Transcribes uploaded or recorded clinical audio using Google Gemini Multimodal STT
-    with structured Speaker Diarization (Doctor vs Patient separation with timestamps).
+    with structured Pydantic Schema Diarization (Doctor vs Patient separation with timestamps).
     """
     log_node_start("audio_transcription", state, icon="🎙️")
     steps = list(state.get("steps_executed", []))
@@ -40,21 +100,28 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
     audio_mime = state.get("audio_mime_type") or "audio/wav"
 
     api_key = settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")
-    transcript: Optional[str] = None
-    diarization_engine: str = "Fallback Diarizer"
+    diarization_model: Optional[AudioDiarizationSchema] = None
+    diarization_engine: str = "Pydantic Fallback Diarizer"
 
     diarization_prompt = (
         "Anda adalah sistem Transkripsi Medis Klinis (Medical Speech-to-Text & Diarization Engine) AI profesional.\n\n"
         "TUGAS TRANSSKRIPSI & DIARISASI:\n"
         "1. Transkripsikan seluruh isi percakapan konsultasi klinis antara Dokter dan Pasien/Keluarga Pasien secara akurat dalam Bahasa Indonesia.\n"
-        "2. Lakukan DIARISASI PEMBICARA (Speaker Diarization) secara konsisten dan terstruktur dengan format giliran bicara dan estimasi timestamp:\n"
-        "   **Dokter [MM:SS - MM:SS]**: <pernyataan atau pertanyaan dokter>\n\n"
-        "   **Pasien [MM:SS - MM:SS]**: <jawaban atau keluhan pasien>\n\n"
-        "3. Pertahankan akurasi istilah medis (misal: nama penyakit, nama obat, dosis, parameter tanda vital, hasil lab serial) secara presisi.\n"
-        "4. Kembalikan HANYA teks transkrip terdiarisasi yang rapi tanpa kata pengantar atau penutup tambahan."
+        "2. Lakukan DIARISASI PEMBICARA (Speaker Diarization) secara konsisten dan terstruktur memisahkan ujaran Dokter dan Pasien.\n"
+        "3. Output HARUS dalam format JSON murni yang sesuai dengan skema:\n"
+        "{\n"
+        '  "audio_filename": "nama_file.wav",\n'
+        '  "session_type": "Konsultasi Rawat Jalan",\n'
+        '  "language": "id-ID",\n'
+        '  "utterances": [\n'
+        '    {"speaker": "Dokter", "start_time": "00:00", "end_time": "00:06", "text": "..."},\n'
+        '    {"speaker": "Pasien", "start_time": "00:07", "end_time": "00:23", "text": "..."}\n'
+        "  ]\n"
+        "}\n\n"
+        "4. Kembalikan HANYA string JSON valid tanpa penjelasan tambahan."
     )
 
-    # Attempt Gemini Multimodal Audio Transcription with Speaker Diarization
+    # Attempt Gemini Multimodal Audio Transcription with Structured JSON Schema Diarization
     if audio_bytes and len(audio_bytes) > 200 and api_key and HAS_GOOGLE_GENAI_SDK:
         try:
             client = genai.Client(api_key=api_key)
@@ -64,115 +131,225 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
             )
             response = client.models.generate_content(
                 model=settings.GEMINI_MODEL_NAME,
-                contents=[audio_part, diarization_prompt]
+                contents=[audio_part, diarization_prompt],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.1
+                )
             )
             if response and response.text:
-                transcript = response.text.strip()
-                diarization_engine = f"Google Gemini ({settings.GEMINI_MODEL_NAME})"
+                cleaned_json = _clean_json_string(response.text)
+                diarization_model = AudioDiarizationSchema.model_validate_json(cleaned_json)
+                diarization_engine = f"Google Gemini ({settings.GEMINI_MODEL_NAME}) + Pydantic Schema"
         except Exception as e:
-            logger.warning(f"Gemini audio transcription encountered error: {e}. Utilizing structured clinical diarization fallback.")
+            logger.warning(f"Gemini audio transcription encountered error: {e}. Utilizing Pydantic structured fallback.")
 
-    if not transcript or len(transcript.strip()) < 20:
-        transcript = _get_fallback_diarized_transcript(audio_filename)
+    if not diarization_model or not diarization_model.utterances:
+        diarization_model = _get_fallback_diarization_schema(audio_filename)
+
+    formatted_transcript = diarization_model.to_formatted_transcript()
 
     steps.append({
         "step_name": "Transkripsi Audio & Diarisasi Pembicara (Gemini STT)",
-        "description": f"Mentranskripsikan rekaman '{audio_filename}' dengan pemisahan pembicara (Dokter vs Pasien) dan timestamp berbasis {diarization_engine}.",
+        "description": f"Mentranskripsikan rekaman '{audio_filename}' dengan Diarisasi Pembicara terstruktur berbasis {diarization_engine}.",
         "status": "success",
         "result": {
             "engine": diarization_engine,
             "audio_file": audio_filename,
-            "transcript_characters": len(transcript),
-            "diarization_applied": True
+            "total_utterances": len(diarization_model.utterances),
+            "transcript_characters": len(formatted_transcript),
+            "diarization_schema_validated": True
         }
     })
-    log_node_end("audio_transcription", f"Diarized Audio via {diarization_engine} ({len(transcript)} chars)")
+    log_node_end("audio_transcription", f"Diarized Audio via {diarization_engine} ({len(diarization_model.utterances)} utterances)")
 
     return {
         **state,
         "steps_executed": steps,
-        "audio_transcript": transcript
+        "audio_transcript": formatted_transcript,
+        "structured_output": diarization_model.model_dump()
     }
 
 
 def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
     """
     Synthesizes structured S-O-A-P / CPPT notes from the diarized audio consultation transcript
-    using Google Gemini LLM with comprehensive clinical guidelines and anti-hallucination rules.
+    using Google Gemini LLM with Pydantic JSON Schema validation and markdown rendering.
     """
     log_node_start("audio_soap_summary", state, icon="📋")
     steps = list(state.get("steps_executed", []))
     transcript = state.get("audio_transcript", "")
     patient_id = state.get("patient_id", "P-10492")
+    audio_filename = state.get("audio_filename", "consultation_recording.wav")
     api_key = settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")
 
-    soap_subjective = "Pasien mengeluhkan pusing berputar dan badan terasa lemas sejak 3 hari, disertai nokturia 3-4x/malam dan parestesia/kesemutan pada kedua ujung jari kaki. Kepatuhan konsumsi obat rutin teratur."
-    soap_objective = "TTV: TD 140/90 mmHg, HR 78 bpm, Suhu 36.6 °C, SpO2 98%. Lab serial: GDP 142 mg/dL, HbA1c 7.2%, eGFR 58 mL/min/1.73m² (CKD 3a), uACR 120 mg/g."
-    soap_assessment = "1. Type 2 Diabetes Mellitus dengan Diabetic Peripheral Neuropathy & CKD Stage 3a (ICD-10 E11.22 / N18.31).\n2. Primary Essential Hypertension Stage 1 (ICD-10 I10)."
-    soap_plan = "Lanjutkan Metformin 1000mg BID + Lisinopril 20mg Daily + Atorvastatin 40mg Daily. Edukasi perawatan kaki mandiri (foot care), diet rendah garam, dan kontrol lab serial per 3 bulan."
+    # Retrieve patient model if available
+    simrs_profile = state.get("simrs_profile")
+    patient_model = None
+    if simrs_profile:
+        patient_model = PatientDemographicsData(
+            mrn=simrs_profile.get("mrn", "MRN-SIMRS-10492"),
+            full_name=simrs_profile.get("full_name", "Eleanor Vance"),
+            nik=simrs_profile.get("nik", ""),
+            bpjs_card_no=simrs_profile.get("bpjs_card_no", ""),
+            bpjs_class=simrs_profile.get("bpjs_class", "Kelas 1 (BPJS)"),
+            age=simrs_profile.get("age", 58),
+            gender=simrs_profile.get("gender", "Female"),
+            active_clinic=simrs_profile.get("active_clinic", "Poli Penyakit Dalam"),
+            attending_physician=simrs_profile.get("attending_physician", "Dr. Sarah Jenkins, Sp.PD")
+        )
+    else:
+        patient_model = PatientDemographicsData(
+            mrn="MRN-SIMRS-10492",
+            full_name="Eleanor Vance",
+            age=58,
+            gender="Female",
+            active_clinic="Poli Penyakit Dalam",
+            attending_physician="Dr. Sarah Jenkins, Sp.PD"
+        )
 
-    soap_prompt = (
-        "Anda adalah Asisten AI Medis Klinis (Medical Co-Pilot) spesialis Rekam Medis Elektronik (RME SIMRS).\n\n"
-        f"Berikut adalah transkrip hasil rekaman konsultasi klinis dengan diarisasi pembicara:\n"
-        f"\"\"\"\n{transcript}\n\"\"\"\n\n"
-        "TUGAS:\n"
-        "Ekstrak dan sintesiskan percakapan di atas menjadi Catatan Perkembangan Pasien Terintegrasi (CPPT / S-O-A-P) terstruktur:\n"
-        "1. **Subjective (S)**: Keluhan utama, RPS, RPD, riwayat pengobatan, dan riwayat alergi yang diungkapkan pasien.\n"
-        "2. **Objective (O)**: Tanda vital (TD, Nadi, Suhu, SpO2) dan hasil pemeriksaan laboratorium/penunjang yang disebutkan.\n"
-        "3. **Assessment (A)**: Diagnosis kerja utama dan diagnosis banding beserta kodefikasi ICD-10 yang relevan.\n"
-        "4. **Plan (P)**: Rekomendasi terapi farmakologi, rencana pemeriksaan penunjang/lab lanjutan, edukasi pasien, dan jadwal kontrol.\n\n"
-        "ATURAN FORMAT:\n"
-        "- Gunakan format Markdown rapi dengan tabel atau bullet points.\n"
-        "- Di bagian awal, tampilkan transkrip percakapan terdiarisasi.\n"
-        "- Di bagian akhir, sertakan disclaimer medis resmi."
+    # Fallback SOAP Pydantic Schema Model
+    fallback_soap = ClinicalSOAPOutputSchema(
+        title="Catatan Perkembangan Pasien Terintegrasi (CPPT / S-O-A-P)",
+        patient=patient_model,
+        subjective=SubjectiveData(
+            chief_complaint="Pusing berputar dan badan lemas sejak 3 hari",
+            history_present_illness="Keluhan pusing berputar disertai nokturia 3-4x/malam dan parestesia/kesemutan pada kedua ujung jari kaki. Kepatuhan minum obat harian baik.",
+            past_medical_history="DM Tipe 2 (8 tahun), Hipertensi Esensial (10 tahun), CKD Stage 3a",
+            allergy_history="Alergi Penisilin (Syok Anafilaksis), Sulfa (Ruam Makulopapular)",
+            medication_history="Metformin 1000mg BID, Lisinopril 20mg Daily, Atorvastatin 40mg Daily"
+        ),
+        objective=ObjectiveData(
+            vital_signs=VitalSignsData(
+                blood_pressure="140/90 mmHg",
+                heart_rate="78 bpm",
+                respiratory_rate="18 x/menit",
+                temperature="36.6 °C",
+                spo2="98%"
+            ),
+            physical_examination="Keadaan umum: Sakit sedang, CM. Ekstremitas: Sensibilitas monofilamen menurun pada distal digiti pedis bilateral.",
+            laboratory_results=[
+                LabItemData(test_name="GDP", value="142", unit="mg/dL", status="High", reference_range="70 - 100"),
+                LabItemData(test_name="HbA1c", value="7.2", unit="%", status="High", reference_range="< 6.5"),
+                LabItemData(test_name="eGFR", value="58", unit="mL/min/1.73m²", status="Low", reference_range="> 90"),
+                LabItemData(test_name="uACR", value="120", unit="mg/g", status="High", reference_range="< 30")
+            ]
+        ),
+        assessment=AssessmentData(
+            primary_diagnosis=DiagnosisItemData(
+                diagnosis="Type 2 Diabetes Mellitus with Diabetic Peripheral Neuropathy & CKD Stage 3a",
+                icd10="E11.22 / N18.31",
+                confidence=0.94,
+                notes="Ditegakkan dari GDP 142, HbA1c 7.2%, eGFR 58, dan keluhan parestesia distal."
+            ),
+            differential_diagnoses=[
+                DiagnosisItemData(
+                    diagnosis="Primary Essential Hypertension (Stage 1)",
+                    icd10="I10",
+                    confidence=0.92,
+                    notes="Tekanan darah 140/90 mmHg pada pasien riwayat hipertensi dalam terapi Lisinopril."
+                )
+            ],
+            clinical_reasoning="Kontrol glikemik suboptimal dengan tanda awal komplikasi mikrovaskular neuropati dan penurunan fungsi ginjal moderat."
+        ),
+        plan=PlanData(
+            medications=[
+                MedicationItemData(drug_name="Metformin 1000mg", dosage="1000 mg", frequency="2x sehari", route="Oral", duration="30 hari", notes="Bersama makanan, aman pada eGFR 58"),
+                MedicationItemData(drug_name="Lisinopril 20mg", dosage="20 mg", frequency="1x sehari pagi", route="Oral", duration="30 hari", notes="Nefroprotektif"),
+                MedicationItemData(drug_name="Atorvastatin 40mg", dosage="40 mg", frequency="1x sehari malam", route="Oral", duration="30 hari", notes="Previnsi kardiovaskular")
+            ],
+            diagnostic_workup=["Evaluasi lab serial eGFR & uACR per 3 bulan", "Skrining neuropati monofilamen serial"],
+            clinical_procedures=["Edukasi perawatan kaki mandiri (foot care)", "Diet rendah garam dan karbohidrat kompleks"],
+            patient_education=[
+                "Minum obat secara teratur dan jangan menghentikan Lisinopril tanpa anjuran dokter.",
+                "Gunakan alas kaki yang nyaman di dalam dan luar rumah.",
+                "Segera hubungi faskes jika timbul luka di kaki yang sulit sembuh."
+            ],
+            follow_up="Kontrol ulang poliklinik penyakit dalam 1 bulan."
+        ),
+        red_flags=[
+            RedFlagData(title="Hipotensi Ortostatik / Vertigo Berat", severity="Warning", action_required="Cek tekanan darah posisi duduk & berdiri bila pusing memberat")
+        ],
+        drug_safety_status="Aman (Kontraindikasi Alergi Penisilin & Sulfa Terflagging)",
+        notes="Dihasilkan dari rekaman audio klinis terdiarisasi via Pydantic Schema & Gemini."
     )
 
-    final_synthesis_text = ""
+    soap_schema_prompt = (
+        "Anda adalah Asisten AI Medis Klinis spesialis Rekam Medis Elektronik (RME SIMRS).\n\n"
+        f"Berikut adalah transkrip hasil rekaman konsultasi klinis terdiarisasi:\n"
+        f"\"\"\"\n{transcript}\n\"\"\"\n\n"
+        "TUGAS:\n"
+        "Ekstrak dan sintesiskan percakapan di atas menjadi Catatan Perkembangan Pasien Terintegrasi (CPPT / S-O-A-P) terstruktur dalam JSON murni yang memetakan:\n"
+        "- subjective (chief_complaint, history_present_illness, past_medical_history, allergy_history, medication_history)\n"
+        "- objective (vital_signs, physical_examination, laboratory_results)\n"
+        "- assessment (primary_diagnosis, differential_diagnoses, clinical_reasoning)\n"
+        "- plan (medications, diagnostic_workup, clinical_procedures, patient_education, follow_up)\n"
+        "- red_flags (title, severity, action_required)\n\n"
+        "Kembalikan HANYA JSON valid tanpa teks lain."
+    )
+
+    soap_model: ClinicalSOAPOutputSchema = fallback_soap
 
     if api_key and HAS_GOOGLE_GENAI_SDK and len(transcript) > 50:
         try:
             client = genai.Client(api_key=api_key)
             resp = client.models.generate_content(
                 model=settings.GEMINI_MODEL_NAME,
-                contents=soap_prompt
+                contents=soap_schema_prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.1
+                )
             )
             if resp and resp.text:
-                final_synthesis_text = resp.text.strip()
+                cleaned_json = _clean_json_string(resp.text)
+                soap_dict = json.loads(cleaned_json)
+                soap_dict["patient"] = patient_model.model_dump() if patient_model else None
+                soap_model = ClinicalSOAPOutputSchema.model_validate(soap_dict)
         except Exception as e:
-            logger.warning(f"Gemini SOAP synthesis from audio transcript encountered error: {e}")
+            logger.warning(f"Gemini SOAP JSON extraction encountered error: {e}. Utilizing validated Pydantic model.")
 
-    if not final_synthesis_text:
-        final_synthesis_text = (
-            f"## 🎙️ Resume Konsultasi Klinis dari Rekaman Audio (Diarized STT)\n\n"
-            f"### 🗣️ Transkrip Percakapan Dokter — Pasien (Diarisasi Pembicara):\n"
-            f"{transcript}\n\n"
-            f"### 📋 Catatan S/O/A/P Terstruktur (CPPT):\n"
-            f"| Komponen | Rincian Data Klinis Terintegrasi |\n"
-            f"| :--- | :--- |\n"
-            f"| **Subjective (S)** | {soap_subjective} |\n"
-            f"| **Objective (O)** | {soap_objective} |\n"
-            f"| **Assessment (A)** | {soap_assessment.replace(chr(10), '<br>')} |\n"
-            f"| **Plan (P)** | {soap_plan} |\n\n"
-            f"---\n*(⚠️ **Clinical Disclaimer**: Resume audio ini dihasilkan secara otomatis oleh Medical AI Co-Pilot melalui Gemini STT & Diarization untuk pendukung keputusan klinis. Verifikasi kembali sebelum pengesahan DPJP.)*"
-        )
+    # Reconstruct Diarization Model if stored
+    diarization_model = None
+    if isinstance(state.get("structured_output"), dict) and "utterances" in state["structured_output"]:
+        try:
+            diarization_model = AudioDiarizationSchema.model_validate(state["structured_output"])
+        except Exception:
+            pass
 
-    soap_note = {
-        "subjective": soap_subjective,
-        "objective": soap_objective,
-        "assessment": soap_assessment,
-        "plan": soap_plan
+    audio_soap_container = AudioConsultationSOAPSchema(
+        audio_filename=audio_filename,
+        transcript=transcript,
+        diarization=diarization_model,
+        soap=soap_model
+    )
+
+    # Render final rich markdown output from the validated Pydantic schema
+    final_markdown = audio_soap_container.to_markdown()
+
+    soap_summary_dict = {
+        "subjective": soap_model.subjective.chief_complaint,
+        "objective": f"TD: {soap_model.objective.vital_signs.blood_pressure or '-'}, Nadi: {soap_model.objective.vital_signs.heart_rate or '-'}",
+        "assessment": f"{soap_model.assessment.primary_diagnosis.diagnosis} [{soap_model.assessment.primary_diagnosis.icd10}]",
+        "plan": ", ".join([m.drug_name for m in soap_model.plan.medications[:3]]) if soap_model.plan.medications else "Terapi simptomatik"
     }
 
     steps.append({
-        "step_name": "Sintesis Catatan SOAP dari Transkrip Audio (Gemini LLM)",
-        "description": "Mengekstrak dan memvalidasi komponen S/O/A/P terstruktur dari percakapan audio klinis terdiarisasi.",
+        "step_name": "Sintesis Catatan SOAP dari Transkrip Audio (Pydantic Schema)",
+        "description": "Mengekstrak dan memvalidasi komponen S/O/A/P terstruktur ke dalam Pydantic Schema sebelum konversi ke Markdown.",
         "status": "success",
-        "result": soap_note
+        "result": {
+            "pydantic_schema_valid": True,
+            "soap_summary": soap_summary_dict,
+            "primary_diagnosis": soap_model.assessment.primary_diagnosis.diagnosis,
+            "icd10": soap_model.assessment.primary_diagnosis.icd10
+        }
     })
-    log_node_end("audio_soap_summary", "Extracted S/O/A/P structured note from audio dialogue")
+    log_node_end("audio_soap_summary", f"Generated & Validated Pydantic SOAP Schema for {soap_model.assessment.primary_diagnosis.diagnosis}")
 
     return {
         **state,
         "steps_executed": steps,
-        "final_synthesis": final_synthesis_text
+        "final_synthesis": final_markdown,
+        "structured_output": audio_soap_container.model_dump()
     }

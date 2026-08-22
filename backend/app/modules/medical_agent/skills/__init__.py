@@ -12,6 +12,8 @@ from app.modules.medical_agent.skills.output_schemas import (
     ClinicalSOAPOutputSchema,
     GeneralConsultationKnowledgeSchema,
     SIMRSTransactionReportSchema,
+    DiarizedUtterance,
+    AudioDiarizationSchema,
     AudioConsultationSOAPSchema,
     OutputValidationReport,
     OutputValidator,

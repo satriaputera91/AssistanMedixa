@@ -14,6 +14,9 @@ MANDATORY_CLINICAL_DISCLAIMER = (
 # Domain Primitive Sub-Schemas
 # ==============================================================================
 
+from pydantic import BaseModel, Field, model_validator
+
+
 class VitalSignsData(BaseModel):
     blood_pressure: Optional[str] = Field(default=None, description="Tekanan darah, misal: 120/80 mmHg")
     heart_rate: Optional[str] = Field(default=None, description="Frekuensi nadi, misal: 80 bpm")
@@ -28,6 +31,13 @@ class LabItemData(BaseModel):
     unit: Optional[str] = Field(default="", description="Satuan ukuran, misal: g/dL, mg/dL")
     status: Optional[str] = Field(default="Normal", description="Normal, High, Low, Critical")
     reference_range: Optional[str] = Field(default="", description="Rentang rujukan normal")
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_str_or_dict(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            return {"test_name": data, "value": "Tercatat", "unit": "", "status": "Recorded"}
+        return data
 
 
 class PatientDemographicsData(BaseModel):
@@ -55,12 +65,36 @@ class ObjectiveData(BaseModel):
     physical_examination: Optional[str] = Field(default="", description="Temuan pemeriksaan fisik umum/lokalis")
     laboratory_results: List[LabItemData] = Field(default_factory=list, description="Daftar hasil laboratorium")
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_labs(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            labs = data.get("laboratory_results")
+            if isinstance(labs, dict):
+                data["laboratory_results"] = [
+                    {"test_name": k.replace("_", " ").upper(), "value": str(v), "unit": "", "status": "Recorded"}
+                    for k, v in labs.items()
+                ]
+            elif isinstance(labs, str):
+                data["laboratory_results"] = [{"test_name": labs, "value": "Recorded"}]
+        return data
+
 
 class DiagnosisItemData(BaseModel):
     diagnosis: str = Field(description="Nama diagnosis kerja / banding")
-    icd10: str = Field(description="Kode ICD-10 resmi, misal: E11.9, I10")
+    icd10: str = Field(default="R69", description="Kode ICD-10 resmi, misal: E11.9, I10")
     confidence: Optional[Union[float, str]] = Field(default=0.9, description="Tingkat keyakinan klinis")
     notes: Optional[str] = Field(default="", description="Catatan pendukung atau kriteria diagnostik")
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_str_or_dict(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            icd_match = re.search(r"\[ICD-10:\s*([A-Z0-9\.]+)\]", data, re.IGNORECASE)
+            icd = icd_match.group(1) if icd_match else "R69"
+            clean_name = re.sub(r"\[.*?\]", "", data).strip()
+            return {"diagnosis": clean_name or data, "icd10": icd, "confidence": 0.9}
+        return data
 
 
 class AssessmentData(BaseModel):
@@ -68,20 +102,49 @@ class AssessmentData(BaseModel):
     differential_diagnoses: List[DiagnosisItemData] = Field(default_factory=list, description="Diagnosis banding")
     clinical_reasoning: Optional[str] = Field(default="", description="Alasan klinis dan patofisiologi")
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_assessment(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if isinstance(data.get("primary_diagnosis"), str):
+                data["primary_diagnosis"] = DiagnosisItemData.parse_str_or_dict(data["primary_diagnosis"])
+            diffs = data.get("differential_diagnoses")
+            if isinstance(diffs, list):
+                data["differential_diagnoses"] = [
+                    DiagnosisItemData.parse_str_or_dict(d) if isinstance(d, str) else d for d in diffs
+                ]
+            elif isinstance(diffs, str):
+                data["differential_diagnoses"] = [DiagnosisItemData.parse_str_or_dict(diffs)]
+        return data
+
 
 class MedicationItemData(BaseModel):
     drug_name: str = Field(description="Nama zat aktif atau obat")
-    dosage: str = Field(description="Dosis terapi, misal: 500 mg")
-    frequency: str = Field(description="Frekuensi pemakaian, misal: 3x sehari")
+    dosage: str = Field(default="Standard", description="Dosis terapi, misal: 500 mg")
+    frequency: str = Field(default="Sesuai anjuran", description="Frekuensi pemakaian, misal: 3x sehari")
     route: Optional[str] = Field(default="Oral", description="Rute pemberian: Oral, IV, IM, Topikal")
     duration: Optional[str] = Field(default="", description="Durasi terapi, misal: 5 hari, 30 hari")
     notes: Optional[str] = Field(default="", description="Indikasi, penyesuaian dosis, atau peringatan")
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_str_or_dict(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            return {"drug_name": data, "dosage": "Standard", "frequency": "Sesuai resep dokter", "route": "Oral"}
+        return data
 
 
 class RedFlagData(BaseModel):
     title: str = Field(description="Nama tanda bahaya klinis")
     severity: str = Field(default="Warning", description="Critical, High, Warning")
-    action_required: str = Field(description="Tindakan darurat / intervensi yang disarankan")
+    action_required: str = Field(default="Monitoring ketat", description="Tindakan darurat / intervensi yang disarankan")
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_str_or_dict(cls, data: Any) -> Any:
+        if isinstance(data, str):
+            return {"title": data, "severity": "Warning", "action_required": "Monitoring klinis & evaluasi berkala"}
+        return data
 
 
 class PlanData(BaseModel):
@@ -90,6 +153,23 @@ class PlanData(BaseModel):
     clinical_procedures: List[str] = Field(default_factory=list, description="Prosedur atau tindakan medis")
     patient_education: List[str] = Field(default_factory=list, description="Edukasi pasien dan modifikasi gaya hidup")
     follow_up: Optional[str] = Field(default="Kontrol ulang 1-2 minggu", description="Jadwal kunjungan tindak lanjut")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_plan(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for field in ["diagnostic_workup", "clinical_procedures", "patient_education"]:
+                val = data.get(field)
+                if isinstance(val, str):
+                    data[field] = [val]
+            meds = data.get("medications")
+            if isinstance(meds, list):
+                data["medications"] = [
+                    MedicationItemData.parse_str_or_dict(m) if isinstance(m, str) else m for m in meds
+                ]
+            elif isinstance(meds, str):
+                data["medications"] = [MedicationItemData.parse_str_or_dict(meds)]
+        return data
 
 
 # ==============================================================================
@@ -110,6 +190,17 @@ class ClinicalSOAPOutputSchema(BaseModel):
     red_flags: List[RedFlagData] = Field(default_factory=list)
     drug_safety_status: Optional[str] = Field(default="Aman (Tidak ditemukan interaksi mayor / alergi)")
     notes: Optional[str] = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_soap_schema(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            rf = data.get("red_flags")
+            if isinstance(rf, dict):
+                data["red_flags"] = [RedFlagData.parse_str_or_dict(rf)]
+            elif isinstance(rf, str):
+                data["red_flags"] = [RedFlagData.parse_str_or_dict(rf)]
+        return data
 
     def to_markdown(self) -> str:
         md = f"## {self.title}\n\n"
@@ -312,19 +403,47 @@ class SIMRSTransactionReportSchema(BaseModel):
         return md
 
 
+class DiarizedUtterance(BaseModel):
+    speaker: str = Field(description="Label pembicara: 'Dokter', 'Pasien', atau 'Keluarga Pasien'")
+    start_time: Optional[str] = Field(default="00:00", description="Waktu mulai, misal: '00:00'")
+    end_time: Optional[str] = Field(default="00:00", description="Waktu selesai, misal: '00:06'")
+    text: str = Field(description="Isi dialog atau ujaran percakapan")
+
+
+class AudioDiarizationSchema(BaseModel):
+    """
+    Structured Pydantic Model for Audio Speech-to-Text & Speaker Diarization.
+    """
+    audio_filename: str = Field(default="consultation_recording.wav", description="Nama file audio rekaman")
+    session_type: str = Field(default="Konsultasi Klinis Rawat Jalan", description="Jenis sesi klinis")
+    language: str = Field(default="id-ID", description="Bahasa transkripsi")
+    utterances: List[DiarizedUtterance] = Field(default_factory=list, description="Daftar ujaran percakapan terdiarisasi")
+    
+    def to_formatted_transcript(self) -> str:
+        lines = []
+        for u in self.utterances:
+            time_str = f"[{u.start_time} - {u.end_time}]" if u.start_time and u.end_time else ""
+            lines.append(f"**{u.speaker} {time_str}**: '{u.text}'")
+        return "\n\n".join(lines)
+
+
 class AudioConsultationSOAPSchema(BaseModel):
     """
-    Structured Schema for Audio Consultation Transcription & SOAP Synthesis.
+    Structured Pydantic Model for Diarized Audio Consultation Transcription & SOAP Synthesis.
     """
     output_type: str = Field(default="audio_soap", description="Identifier output schema")
-    audio_filename: str
-    transcript: str
+    audio_filename: str = Field(default="consultation_recording.wav")
+    transcript: str = Field(description="Transkrip lengkap percakapan terdiarisasi")
+    diarization: Optional[AudioDiarizationSchema] = None
     soap: ClinicalSOAPOutputSchema
 
     def to_markdown(self) -> str:
-        md = f"## 🎙️ Rekaman Konsultasi Klinis ({self.audio_filename})\n\n"
-        md += "### 🗣️ Transkrip Percakapan Dokter — Pasien\n"
-        md += f"{self.transcript}\n\n"
+        md = f"## 🎙️ Resume Konsultasi Klinis dari Rekaman Audio ({self.audio_filename})\n\n"
+        md += "### 🗣️ Transkrip Percakapan Dokter — Pasien (Diarisasi Pembicara):\n"
+        if self.diarization and self.diarization.utterances:
+            md += self.diarization.to_formatted_transcript() + "\n\n"
+        else:
+            md += f"{self.transcript}\n\n"
         md += self.soap.to_markdown()
         return md
 
