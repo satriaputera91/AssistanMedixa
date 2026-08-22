@@ -33,6 +33,8 @@ class AgentChatResponse(BaseModel):
     audio_transcript: Optional[str] = None
     soa_note: Optional["SOANoteSchema"] = None
     output_validation: Optional[OutputValidationSchema] = None
+    structured_output: Optional[Dict[str, Any]] = None
+
 
 
 

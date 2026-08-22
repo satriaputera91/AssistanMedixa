@@ -104,10 +104,12 @@ class LLMOutputValidator:
         cls,
         output_text: str,
         simrs_anamnesis: Optional[Dict[str, Any]] = None,
-        drug_safety_screening: Optional[Dict[str, Any]] = None
+        drug_safety_screening: Optional[Dict[str, Any]] = None,
+        structured_output: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Check whether recommended medications in the LLM output violate known patient allergies.
+        Validates both text content and typed structured_output medication objects.
         """
         contraindication_alerts: List[str] = []
         allergy_str = ""
@@ -130,14 +132,28 @@ class LLMOutputValidator:
             if allergen_key in allergy_str:
                 active_allergens.append((allergen_key, drug_list))
 
-        # Check if any associated drug is proposed in Plan / Medication section
+        # Check structured output medications if available
+        if structured_output:
+            plan_meds = structured_output.get("plan", {}).get("medications", []) if isinstance(structured_output.get("plan"), dict) else []
+            if not plan_meds and isinstance(structured_output.get("treatment_recommendations"), list):
+                plan_meds = structured_output.get("treatment_recommendations", [])
+
+            for m in plan_meds:
+                m_name = (m.get("drug_name") if isinstance(m, dict) else str(m)).lower()
+                for allergen_key, drug_list in active_allergens:
+                    for drug in drug_list:
+                        if drug in m_name:
+                            contraindication_alerts.append(
+                                f"🚨 KONTRAINDIKASI ALERGI (Structured Plan): Obat '{m_name.title()}' dikontraindikasikan dengan riwayat alergi '{allergen_key.title()}' ({allergy_str})."
+                            )
+
+        # Check raw text for any mentions
         for allergen_key, drug_list in active_allergens:
             for drug in drug_list:
-                # Look for drug word boundaries
                 if re.search(rf"\b{re.escape(drug)}\b", text_lower):
-                    contraindication_alerts.append(
-                        f"🚨 KONTRAINDIKASI ALERGI: Output merekomendasikan '{drug.title()}' padahal pasien memiliki riwayat alergi '{allergen_key.title()}' ({allergy_str})."
-                    )
+                    alert_msg = f"🚨 KONTRAINDIKASI ALERGI: Output merekomendasikan '{drug.title()}' padahal pasien memiliki riwayat alergi '{allergen_key.title()}' ({allergy_str})."
+                    if alert_msg not in contraindication_alerts:
+                        contraindication_alerts.append(alert_msg)
 
         # Cross-reference with drug safety screening findings
         if drug_safety_screening and drug_safety_screening.get("allergy_contraindications"):
@@ -150,6 +166,7 @@ class LLMOutputValidator:
             "contraindication_alerts": list(set(contraindication_alerts)),
             "patient_allergies": allergy_str
         }
+
 
     @classmethod
     def validate_red_flag_coverage(
@@ -230,7 +247,8 @@ class LLMOutputValidator:
         simrs_labs: Optional[Dict[str, Any]] = None,
         red_flag_detections: Optional[Dict[str, Any]] = None,
         drug_safety_screening: Optional[Dict[str, Any]] = None,
-        config: Optional[Dict[str, Any]] = None
+        config: Optional[Dict[str, Any]] = None,
+        structured_output: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Comprehensive evaluation pipeline for validating LLM-generated output.
@@ -258,12 +276,14 @@ class LLMOutputValidator:
             simrs_labs=simrs_labs
         )
 
-        # 3. Allergy & Contraindication Check
+        # 3. Allergy & Contraindication Check (text + structured_output)
         allergy_res = cls.validate_allergy_contraindications(
             sanitized_text,
             simrs_anamnesis=simrs_anamnesis,
-            drug_safety_screening=drug_safety_screening
+            drug_safety_screening=drug_safety_screening,
+            structured_output=structured_output
         )
+
 
         # 4. Red Flag Coverage Check
         red_flag_res = cls.validate_red_flag_coverage(

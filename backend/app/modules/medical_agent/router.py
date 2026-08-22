@@ -147,7 +147,9 @@ def execute_agent_chat(
         final_synthesis=final_state["final_synthesis"],
         workflow_type="text",
         output_validation=final_state.get("output_validation"),
+        structured_output=final_state.get("structured_output"),
     )
+
 
 
 
@@ -278,7 +280,9 @@ async def execute_audio_chat(
         audio_transcript=final_state.get("audio_transcript"),
         soa_note=_serialize_soa_note(soa_note) if soa_note else None,
         output_validation=final_state.get("output_validation"),
+        structured_output=final_state.get("structured_output"),
     )
+
 
 
 
@@ -446,8 +450,12 @@ async def execute_agent_chat_stream(
             yield f"data: {json.dumps({'event': 'chunk', 'text': chunk})}\n\n"
             await asyncio.sleep(0.05)
             
+        if final_state.get("structured_output"):
+            yield f"data: {json.dumps({'event': 'structured_output', 'structured_output': final_state['structured_output']})}\n\n"
+            
         if final_state.get("output_validation"):
             yield f"data: {json.dumps({'event': 'output_validation', 'validation': final_state['output_validation']})}\n\n"
+
             
         session_id = request.session_id or f"session-{int(datetime.now().timestamp())}"
         yield f"data: {json.dumps({'event': 'completed', 'session_id': session_id})}\n\n"

@@ -152,6 +152,78 @@ def test_evaluate_all_comprehensive():
     assert len(evaluation["alerts"]) > 0
 
 
+def test_pydantic_soap_schema_to_markdown():
+    from app.modules.medical_agent.output_schemas import (
+        ClinicalSOAPOutputSchema, SubjectiveData, ObjectiveData, VitalSignsData,
+        LabItemData, AssessmentData, DiagnosisItemData, PlanData, MedicationItemData,
+        RedFlagData, PatientDemographicsData
+    )
+    soap = ClinicalSOAPOutputSchema(
+        patient=PatientDemographicsData(mrn="MRN-SIMRS-10492", full_name="Eleanor Vance", age=58, gender="Female"),
+        subjective=SubjectiveData(chief_complaint="Nyeri ulu hati", allergy_history="Penisilin"),
+        objective=ObjectiveData(
+            vital_signs=VitalSignsData(blood_pressure="130/80 mmHg", heart_rate="78 bpm"),
+            laboratory_results=[LabItemData(test_name="HbA1c", value="6.5", unit="%")]
+        ),
+        assessment=AssessmentData(
+            primary_diagnosis=DiagnosisItemData(diagnosis="Dispepsia Fungsional", icd10="K30"),
+            differential_diagnoses=[DiagnosisItemData(diagnosis="Gastritis Akut", icd10="K29.0")]
+        ),
+        plan=PlanData(
+            medications=[MedicationItemData(drug_name="Omeprazole", dosage="20mg", frequency="2x1", notes="Sebelum makan")],
+            patient_education=["Hindari makanan pedas dan asam"]
+        ),
+        red_flags=[RedFlagData(title="Hematemesis / Melena", severity="Critical", action_required="Segera ke IGD")]
+    )
+    md = soap.to_markdown()
+    assert "Dispepsia Fungsional" in md
+    assert "K30" in md
+    assert "130/80 mmHg" in md
+    assert "Omeprazole" in md
+    assert "Clinical Disclaimer" in md
+    d = soap.model_dump()
+    assert d["output_type"] == "clinical_soap"
+    assert d["subjective"]["chief_complaint"] == "Nyeri ulu hati"
+
+
+def test_pydantic_general_knowledge_schema_to_markdown():
+    from app.modules.medical_agent.output_schemas import (
+        GeneralConsultationKnowledgeSchema, MedicationItemData, RedFlagData
+    )
+    knowledge = GeneralConsultationKnowledgeSchema(
+        title="Panduan Terapi Diabetes Melitus Tipe 2",
+        summary="Ringkasan pedoman tatalaksana DM Tipe 2 berbasis bukti.",
+        key_points=["Target HbA1c < 7.0%", "Modifikasi gaya hidup dan metformin sebagai lini pertama."],
+        treatment_recommendations=[
+            MedicationItemData(drug_name="Metformin", dosage="500 mg", frequency="2x sehari", notes="Dosis titrasi")
+        ],
+        red_flags=[RedFlagData(title="Gejala Hipoglikemia Akut", severity="Critical", action_required="Pemberian glukosa cepat")]
+    )
+    md = knowledge.to_markdown()
+    assert "Diabetes Melitus Tipe 2" in md
+    assert "Metformin" in md
+    assert "Hipoglikemia" in md
+    assert "Clinical Disclaimer" in md
+
+
+def test_structured_allergy_contraindication_validation():
+    from app.modules.guardrails.output_validator import LLMOutputValidator
+    structured_plan = {
+        "plan": {
+            "medications": [
+                {"drug_name": "Amoxicillin 500mg", "dosage": "500mg", "frequency": "3x1"}
+            ]
+        }
+    }
+    res = LLMOutputValidator.validate_allergy_contraindications(
+        output_text="Pasien diberikan obat antibiotik.",
+        simrs_anamnesis={"allergy_history": "Riwayat alergi penisilin"},
+        structured_output=structured_plan
+    )
+    assert res["allergy_safe"] is False
+    assert any("Structured Plan" in a for a in res["contraindication_alerts"])
+
+
 def test_langgraph_agent_output_validation_integration():
     """Verify that LangGraph executes validate_output node and populates output_validation in final state."""
     initial_state = {
@@ -187,11 +259,14 @@ if __name__ == "__main__":
         ("Red Flag Omission Detection", test_red_flag_coverage_omission),
         ("Clinical Disclaimer Auto-Remediation", test_disclaimer_auto_remediation),
         ("Comprehensive Output Evaluation", test_evaluate_all_comprehensive),
+        ("Pydantic SOAP Schema Validation & Markdown Render", test_pydantic_soap_schema_to_markdown),
+        ("Pydantic General Knowledge Schema Validation & Markdown Render", test_pydantic_general_knowledge_schema_to_markdown),
+        ("Structured Field-Level Allergy Validation", test_structured_allergy_contraindication_validation),
         ("LangGraph Agent Graph Output Validation Integration", test_langgraph_agent_output_validation_integration),
     ]
 
     print("=" * 70)
-    print("RUNNING LLM OUTPUT VALIDATION TEST SUITE")
+    print("RUNNING LLM OUTPUT VALIDATION & PYDANTIC SCHEMA TEST SUITE")
     print("=" * 70)
     passed = 0
     for name, test_fn in tests:
@@ -209,4 +284,5 @@ if __name__ == "__main__":
     print("=" * 70)
     if passed != len(tests):
         sys.exit(1)
+
 

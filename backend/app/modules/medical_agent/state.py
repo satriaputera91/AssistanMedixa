@@ -34,4 +34,6 @@ class MedicalAgentState(TypedDict, total=False):
     audio_transcript: Optional[str]
     audio_error: Optional[str]
     output_validation: Optional[Dict[str, Any]]
+    structured_output: Optional[Dict[str, Any]]
+
 
