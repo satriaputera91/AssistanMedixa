@@ -1,9 +1,11 @@
 import os
+import re
 import sqlite3
 import logging
 import inspect
 from datetime import datetime
 from typing import Dict, Any, List
+
 # pyrefly: ignore [missing-import]
 from langgraph.graph import StateGraph, END
 # pyrefly: ignore [missing-import]
@@ -1610,13 +1612,25 @@ def _generate_fallback_synthesis(
             notes="Perlu dipertimbangkan jika respon terhadap PPI tidak adekuat."
         )
     ]
+    def _safe_conf(val: Any) -> float:
+        if val is None:
+            return 0.9
+        if isinstance(val, (int, float)):
+            return float(val) if val <= 1.0 else float(val) / 100.0
+        s = str(val).strip()
+        match = re.search(r"(\d+(?:\.\d+)?)", s)
+        if match:
+            num = float(match.group(1))
+            return num if num <= 1.0 else num / 100.0
+        return 0.85
+
     if diagnostic_rec:
         if diagnostic_rec.get("primary_recommendations"):
             p = diagnostic_rec["primary_recommendations"][0]
             primary_diag = DiagnosisItemData(
                 diagnosis=p.get("diagnosis", primary_diag.diagnosis),
                 icd10=p.get("icd10", primary_diag.icd10),
-                confidence=float(str(p.get("confidence", "0.9")).replace("%", "")) / 100 if "%" in str(p.get("confidence", "")) else 0.9,
+                confidence=_safe_conf(p.get("confidence")),
                 notes=p.get("justification", "")
             )
         if diagnostic_rec.get("differential_diagnoses"):
@@ -1625,8 +1639,10 @@ def _generate_fallback_synthesis(
                 diff_diags.append(DiagnosisItemData(
                     diagnosis=d.get("diagnosis", ""),
                     icd10=d.get("icd10", ""),
+                    confidence=_safe_conf(d.get("confidence")),
                     notes=d.get("clinical_clues", "")
                 ))
+
 
     assess_model = AssessmentData(
         primary_diagnosis=primary_diag,

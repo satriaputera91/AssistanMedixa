@@ -1,7 +1,8 @@
 import re
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from pydantic import BaseModel, Field
 from datetime import datetime
+
 
 MANDATORY_CLINICAL_DISCLAIMER = (
     "\n\n---\n*(⚠️ **Clinical Disclaimer**: Sistem pendukung keputusan klinis AI ditujukan untuk "
@@ -58,8 +59,9 @@ class ObjectiveData(BaseModel):
 class DiagnosisItemData(BaseModel):
     diagnosis: str = Field(description="Nama diagnosis kerja / banding")
     icd10: str = Field(description="Kode ICD-10 resmi, misal: E11.9, I10")
-    confidence: Optional[float] = Field(default=0.9, ge=0.0, le=1.0, description="Tingkat keyakinan klinis")
+    confidence: Optional[Union[float, str]] = Field(default=0.9, description="Tingkat keyakinan klinis")
     notes: Optional[str] = Field(default="", description="Catatan pendukung atau kriteria diagnostik")
+
 
 
 class AssessmentData(BaseModel):
