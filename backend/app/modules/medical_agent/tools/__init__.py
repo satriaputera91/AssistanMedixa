@@ -8,6 +8,8 @@ from app.modules.medical_agent.tools.simrs_tools import (
 from app.modules.medical_agent.tools.clinical_tools import (
     tool_query_patient_ehr,
     tool_generate_diagnostic_recommendations,
+    tool_generate_med_generation,
+    tool_detect_clinical_red_flags,
     tool_check_drug_interactions
 )
 from app.modules.medical_agent.tools.rag_tools import (
@@ -27,6 +29,8 @@ __all__ = [
     "tool_simrs_update_patient_record",
     "tool_query_patient_ehr",
     "tool_generate_diagnostic_recommendations",
+    "tool_generate_med_generation",
+    "tool_detect_clinical_red_flags",
     "tool_check_drug_interactions",
     "tool_vector_rag_search",
     "tool_get_clinical_literature_summary",

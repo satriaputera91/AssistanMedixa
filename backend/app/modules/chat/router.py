@@ -7,13 +7,26 @@ from app.modules.chat.schemas import ChatSessionSchema, CreateSessionRequest, Re
 
 router = APIRouter(prefix="/chat", tags=["Chat History"])
 
+def _enrich_session(sess: dict) -> dict:
+    enriched = dict(sess)
+    temp_id = sess.get("temp_soap_id")
+    temp_rec = None
+    if temp_id:
+        temp_rec = db.get_temp_soap(temp_id)
+    if not temp_rec:
+        temp_rec = db.get_temp_soap_by_session(sess["session_id"])
+        if temp_rec:
+            enriched["temp_soap_id"] = temp_rec["temp_id"]
+    enriched["temp_soap"] = temp_rec
+    return enriched
+
 @router.get("/sessions", response_model=List[ChatSessionSchema])
 def list_chat_sessions(current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))):
     # Filter sessions for current user or all if admin
     user_sessions = []
     for sess in db.chat_sessions.values():
         if current_user.role == "admin" or sess["user_id"] == current_user.sub:
-            user_sessions.append(sess)
+            user_sessions.append(_enrich_session(sess))
     return user_sessions
 
 @router.get("/sessions/{session_id}", response_model=ChatSessionSchema)
@@ -23,7 +36,7 @@ def get_chat_session(session_id: str, current_user: TokenPayload = Depends(requi
         raise HTTPException(status_code=404, detail="Chat session not found")
     if current_user.role != "admin" and sess["user_id"] != current_user.sub:
         raise HTTPException(status_code=403, detail="Forbidden access to chat session")
-    return sess
+    return _enrich_session(sess)
 
 @router.post("/sessions", response_model=ChatSessionSchema)
 def create_chat_session(request: CreateSessionRequest, current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))):

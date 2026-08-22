@@ -7,7 +7,7 @@ GREETING_INSTRUCTION = (
     "Pesan dokter tidak mengandung kueri rekam medis spesifik atau kueri workflow khusus (misal: salam, sapaan, atau percakapan umum). "
     "Tanggapi dengan ramah dan sopan dalam Bahasa Indonesia, tanyakan bagaimana Anda dapat membantu dokter, dan jelaskan secara ringkas fitur layanan klinis yang siap digunakan:\n"
     "1. **📋 Ambil Informasi Demografi Pasien**\n"
-    "2. **📝 Ambil Data Anamnesis SIMRS**\n"
+    "2. **📝 Ambil Anamnesis Sebelumnya**\n"
     "3. **🧪 Evaluasi Hasil Lab & Tanda Vital Serial**\n"
     "4. **🎯 Rekomendasi Diagnosis & Kodefikasi ICD-10**\n"
     "5. **💊 Rekomendasi Terapi Obat Berbasis Bukti**\n"

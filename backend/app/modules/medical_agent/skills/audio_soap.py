@@ -324,7 +324,7 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
 
     # Fallback SOAP Pydantic Schema Model
     fallback_soap = ClinicalSOAPOutputSchema(
-        title="Catatan Perkembangan Pasien Terintegrasi (CPPT / S-O-A-P)",
+        title="Hasil Rekomendasi Resume (CPPT / S-O-A-P)",
         patient=patient_model,
         subjective=SubjectiveData(
             chief_complaint=subj_chief,
@@ -400,7 +400,7 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
         "TUGAS:\n"
         "Integrasikan data transkrip rekaman audio dengan data Anamnesis dan Laboratorium SIMRS di atas untuk menghasilkan resume CPPT S-O-A-P terstruktur dalam JSON valid sesuai skema:\n"
         "{\n"
-        '  "title": "📋 Catatan Perkembangan Pasien Terintegrasi (CPPT / S-O-A-P)",\n'
+        '  "title": "📋 Hasil Rekomendasi Resume (CPPT / S-O-A-P)",\n'
         '  "subjective": {\n'
         '    "chief_complaint": "Keluhan utama pasien",\n'
         '    "history_present_illness": "Riwayat penyakit sekarang",\n'

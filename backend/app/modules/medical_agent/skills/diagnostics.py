@@ -52,32 +52,38 @@ def node_eval_simrs_labs(state: MedicalAgentState) -> MedicalAgentState:
     }
 
 def node_diagnostic_recommendation(state: MedicalAgentState) -> MedicalAgentState:
-    """Generates primary & differential diagnoses with ICD-10 codification and confidence scoring."""
+    """Generates primary & differential diagnoses with ICD-10 codification and confidence scoring, integrating Temp SOAP if present."""
     log_node_start("diagnostic_recommendation", state, icon="🎯")
     steps = list(state.get("steps_executed", []))
     anamnesis = state.get("simrs_anamnesis")
     ehr_data = state.get("ehr_data")
     simrs_history = state.get("simrs_history")
+    temp_soap_data = state.get("temp_soap_data")
     chronic = simrs_history.get("chronic_conditions", []) if simrs_history else []
 
     diag_rec = tool_generate_diagnostic_recommendations(
         anamnesis=anamnesis,
         ehr_data=ehr_data,
-        chronic_conditions=chronic
+        chronic_conditions=chronic,
+        temp_soap_content=temp_soap_data.get("soap_content") if temp_soap_data else None
+    )
+
+    desc = (
+        "Menghasilkan rekomendasi diagnosis kerja (primer) dan diagnosis banding lengkap dengan kodefikasi ICD-10, diperkuat resume analisis SOAP sementara (Temp SOAP / Rekaman Audio)."
     )
 
     steps.append({
         "step_name": "4. Rekomendasi Diagnosis & ICD-10 Pasien",
-        "description": "Menghasilkan rekomendasi diagnosis kerja (primer) dan diagnosis banding lengkap dengan kodefikasi ICD-10.",
+        "description": desc,
         "status": "success",
         "result": {
             "diagnosis_primer": diag_rec.get("primary_recommendations", []),
             "diagnosis_banding": diag_rec.get("differential_diagnoses", []),
             "kode_icd10": diag_rec.get("icd10_coding", []),
-            "rencana_penunjang": diag_rec.get("recommended_workups", [])
+            "rencana_penunjang": diag_rec.get("recommended_workups", []),
         }
     })
-    log_node_end("diagnostic_recommendation", f"Generated {len(diag_rec.get('primary_recommendations', []))} primary diagnoses & {len(diag_rec.get('differential_diagnoses', []))} differentials | ICD-10: {diag_rec.get('icd10_coding', [])}")
+    log_node_end("diagnostic_recommendation", f"Generated {len(diag_rec.get('primary_recommendations', []))} primary diagnoses & {len(diag_rec.get('differential_diagnoses', []))} differentials")
 
     return {
         **state,

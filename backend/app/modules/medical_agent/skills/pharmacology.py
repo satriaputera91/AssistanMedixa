@@ -2,118 +2,71 @@ import logging
 from typing import Dict, Any, List
 from app.modules.medical_agent.context.state import MedicalAgentState
 from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
+from app.modules.medical_agent.tools.clinical_tools import tool_generate_med_generation
 
 def node_km_medication_recommendation(state: MedicalAgentState) -> MedicalAgentState:
-    """Provides guideline-directed first-line drug therapy recommendations and renal dosing."""
+    """Provides guideline-directed first-line drug therapy recommendations and renal dosing, enriched with Qdrant RAG Knowledge."""
     log_node_start("km_medication_recommendation", state, icon="💊")
     steps = list(state.get("steps_executed", []))
     ehr_data = state.get("ehr_data") or {}
     simrs_anamnesis = state.get("simrs_anamnesis") or {}
-    
-    chief = (simrs_anamnesis.get("chief_complaint") or "").lower()
-    rps = (simrs_anamnesis.get("history_present_illness") or "").lower()
-    combined_query = f"{chief} {rps} {state.get('user_query', '')}".lower()
+    diag_rec = state.get("diagnostic_recommendations") or {}
+    simrs_history = state.get("simrs_history") or {}
+    temp_soap_data = state.get("temp_soap_data")
+    chronic = simrs_history.get("chronic_conditions", []) if simrs_history else []
 
-    if any(k in combined_query for k in ["ulu hati", "lambung", "gastritis", "perih", "anemia", "ferritin", "mual", "30124"]):
-        med_rec = {
-            "disease": "Gastritis Kronis Erosif & Anemia Defisiensi Besi",
-            "recommended_regimens": [
-                {
-                    "drug_name": "Omeprazole 20mg",
-                    "class": "Proton Pump Inhibitor (PPI)",
-                    "dosage_guide": "20mg BID (2x sehari) diminum 30-60 menit sebelum makan pagi & malam selama 14-28 hari",
-                    "renal_dosing": "Tidak memerlukan penyesuaian dosis pada gangguan ginjal",
-                    "indication": "Supresi sekresi asam lambung & penyembuhan mukosa erosif"
-                },
-                {
-                    "drug_name": "Sukralfat Suspensi 500mg/5mL",
-                    "class": "Mucosal Protective Agent",
-                    "dosage_guide": "500mg/5mL 3x1 sendok makan (15 mL) saat perut kosong (1 jam sebelum makan)",
-                    "renal_dosing": "Gunakan hati-hati pada CKD lanjut (risiko akumulasi aluminium)",
-                    "indication": "Pelindung sawar mukosa gaster terhadap asam dan pepsin"
-                },
-                {
-                    "drug_name": "Ferrous Fumarate / Sulfas Ferosus 300mg",
-                    "class": "Oral Iron Supplementation",
-                    "dosage_guide": "300mg 1x1 tablet per hari setelah makan, berikan jeda minimal 2 jam dari antasida/sukralfat",
-                    "renal_dosing": "Aman pada gangguan ginjal, pantau profil besi serial",
-                    "indication": "Koreksi cadangan besi pada Anemia Defisiensi Besi"
-                }
-            ],
-            "contraindicated_drugs": ["NSAID (Ketorolac, Asam Mefenamat, Ibuprofen)", "Aspirin dosis tinggi"],
-            "monitoring_points": ["Evaluasi perbaikan keluhan dispepsia setelah 2 minggu", "Pemeriksaan serial Hb & Ferritin dalam 4-8 minggu"]
-        }
-    elif any(k in combined_query for k in ["dada", "nyeri dada", "angina", "tangga", "berdebar", "jantung", "20811"]):
-        med_rec = {
-            "disease": "Chronic Coronary Syndrome (CAD Post-PCI) & Dislipidemia",
-            "recommended_regimens": [
-                {
-                    "drug_name": "Clopidogrel 75mg",
-                    "class": "Antiplatelet P2Y12 Inhibitor",
-                    "dosage_guide": "75mg 1x1 tablet per hari setelah makan",
-                    "renal_dosing": "Tidak ada penyesuaian dosis khusus",
-                    "indication": "Pencegahan trombosis stent pasca PCI DES"
-                },
-                {
-                    "drug_name": "Metoprolol Succinate / Bisoprolol 50mg",
-                    "class": "Beta-Blocker Kardioselektif",
-                    "dosage_guide": "50mg 1x1 tablet per hari pagi",
-                    "renal_dosing": "Aman pada penurunan fungsi ginjal, titrasi berdasarkan target HR 55-65 bpm",
-                    "indication": "Anti-angina, menurunkan konsumsi oksigen miokard & kontrol denyut jantung"
-                },
-                {
-                    "drug_name": "Rosuvastatin 20mg / Atorvastatin 40mg",
-                    "class": "High-Intensity Statin",
-                    "dosage_guide": "20mg 1x1 tablet malam hari",
-                    "renal_dosing": "Pada eGFR < 30 gunakan dosis awal 5mg, pantau fungsi hepar & ginjal",
-                    "indication": "Stabilisasi plak aterosklerosis & reduksi target LDL < 55 mg/dL"
-                }
-            ],
-            "contraindicated_drugs": ["Aspirin (bila riwayat alergi berat / dispepsia berat)", "NSAID non-selektif"],
-            "monitoring_points": ["Pantau EKG serial dan profil lipid per 3 bulan", "Edukasi sedia ISDN sublingual PRN jika serangan angina timbul"]
-        }
+    med_rec = tool_generate_med_generation(
+        anamnesis=simrs_anamnesis,
+        diagnostic_recommendations=diag_rec,
+        ehr_data=ehr_data,
+        chronic_conditions=chronic,
+        temp_soap_content=temp_soap_data.get("soap_content") if temp_soap_data else None,
+        user_query=state.get("user_query", "")
+    )
+
+
+    has_regimens = bool(med_rec and (med_rec.get("recommended_regimens") or med_rec.get("temp_soap_regimens")))
+
+    if has_regimens:
+        desc = (
+            "Menyusun panduan rekomendasi terapi farmakologi berbasis bukti dan penyesuaian dosis fungsi ginjal, diperkuat integrasi analisis resep/terapi SOAP sementara (Temp SOAP / Rekaman Audio) dan bukti klinis Qdrant RAG."
+            )
+        steps.append({
+            "step_name": "5. Rekomendasi Terapi Obat Pasien Ini",
+            "description": desc,
+            "status": "success",
+            "result": {
+                "disease": med_rec.get("disease"),
+                "recommended_regimens": med_rec.get("recommended_regimens"),
+                "contraindicated_drugs": med_rec.get("contraindicated_drugs"),
+                "monitoring_points": med_rec.get("monitoring_points"),
+                "qdrant_rag_evidence": med_rec.get("rag_guideline_evidence", []),
+                "temp_soap_regimens": med_rec.get("temp_soap_regimens"),
+            }
+        })
+        rag_chunks = med_rec.get("rag_chunks", [])
+        log_node_end("km_medication_recommendation", f"Regimens: {len(med_rec.get('recommended_regimens', []))} drugs recommended for {med_rec.get('disease')} | RAG Chunks: {len(rag_chunks)}")
     else:
-        med_rec = {
-            "disease": "Type 2 Diabetes Mellitus, Hypertension & CKD Stage 3a",
-            "recommended_regimens": [
-                {
-                    "drug_name": "Metformin 1000mg",
-                    "class": "Biguanide",
-                    "dosage_guide": "1000mg BID (2x sehari) bersama makanan",
-                    "renal_dosing": "Aman pada eGFR 45-59 mL/min (CKD 3a). Dosis maksimal 1000mg/hari jika eGFR 30-44 mL/min. Hentikan jika eGFR < 30.",
-                    "indication": "Kontrol glikemik lini pertama"
-                },
-                {
-                    "drug_name": "Lisinopril 20mg",
-                    "class": "ACE Inhibitor (Renoprotective)",
-                    "dosage_guide": "20mg 1x1 tablet per hari pagi",
-                    "renal_dosing": "Renoprotektif pada mikroalbuminuria. Pantau kadar Kalium Serum & Kreatinin serial.",
-                    "indication": "Antihipertensi & reduksi progresi nefropati diabetik"
-                },
-                {
-                    "drug_name": "Atorvastatin 40mg",
-                    "class": "Statin Lipid-Lowering",
-                    "dosage_guide": "40mg 1x1 tablet malam hari",
-                    "renal_dosing": "Tidak memerlukan penyesuaian dosis pada gangguan ginjal",
-                    "indication": "Previnsi sekunder kardiovaskular"
-                }
-            ],
-            "contraindicated_drugs": ["NSAID (potensi nefrotoksisitas akut)", "Kontras radiologi berlebih"],
-            "monitoring_points": ["Ulangi lab fungsi ginjal BMP (eGFR, Kalium) dalam 3 bulan", "Pantau uACR berkala"]
-        }
+        med_rec = None
+        rag_chunks = []
+        steps.append({
+            "step_name": "5. Rekomendasi Terapi Obat Pasien Ini",
+            "description": "Tidak ada rekomendasi terapi obat yang ditemukan di basis pengetahuan RAG untuk kueri/pasien ini.",
+            "status": "info",
+            "result": None
+        })
+        log_node_end("km_medication_recommendation", "Tidak ada hasil rekomendasi obat yang ditemukan (dikosongkan).")
 
-    steps.append({
-        "step_name": "5. Rekomendasi Terapi Obat Pasien Ini",
-        "description": "Menyusun panduan rekomendasi terapi farmakologi berbasis bukti dan penyesuaian dosis fungsi ginjal.",
-        "status": "success",
-        "result": med_rec
-    })
-    log_node_end("km_medication_recommendation", f"Regimens: {len(med_rec.get('recommended_regimens', []))} drugs recommended for {med_rec.get('disease')}")
+    existing_rag = list(state.get("rag_chunks", []) or [])
+    for rc in rag_chunks:
+        if not any(e.get("title") == rc.get("title") for e in existing_rag):
+            existing_rag.append(rc)
 
     return {
         **state,
         "steps_executed": steps,
-        "medication_recommendations": med_rec
+        "medication_recommendations": med_rec,
+        "rag_chunks": existing_rag
     }
 
 def node_patient_drug_safety(state: MedicalAgentState) -> MedicalAgentState:

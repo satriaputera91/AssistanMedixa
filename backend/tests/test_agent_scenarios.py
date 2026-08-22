@@ -99,7 +99,7 @@ class TestMedicalAgentScenarios(unittest.TestCase):
         self.assertIsNotNone(res.get("simrs_anamnesis"))
         self.assertIn("chief_complaint", res["simrs_anamnesis"])
         self.assertIn("ulu hati", res["simrs_anamnesis"]["chief_complaint"].lower())
-        self.assertTrue(any("2. Ambil Data Anamnesis SIMRS" in s["step_name"] for s in res["steps_executed"]))
+        self.assertTrue(any("2. Ambil Anamnesis Sebelumnya" in s["step_name"] for s in res["steps_executed"]))
         self.assertTrue(any(k in res["final_synthesis"] for k in ["Anamnesis", "Keluhan Utama", "ulu hati"]))
 
     def test_04_patient_labs_and_vitals_evaluation_scenario(self):

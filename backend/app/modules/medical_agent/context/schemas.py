@@ -61,6 +61,49 @@ class SOARevisionConfirmationRequest(BaseModel):
     accepted: bool
     doctor_comments: Optional[str] = None
 
+class TempSOAPContentSchema(BaseModel):
+    subjective: str = ""
+    objective: str = ""
+    assessment: str = ""
+    plan: Optional[str] = ""
+    instructions: Optional[str] = ""
+
+class TempSOAPRecordSchema(BaseModel):
+    temp_id: str
+    session_id: str
+    patient_id: Optional[str] = None
+    patient_name: Optional[str] = None
+    mrn: Optional[str] = None
+    nik: Optional[str] = None
+    user_id: str
+    doctor_name: str
+    audio_filename: str
+    audio_url: str
+    audio_path: Optional[str] = None
+    audio_size_bytes: int = 0
+    audio_transcript: str = ""
+    soap_content: TempSOAPContentSchema
+    raw_markdown: str = ""
+    structured_output: Optional[Dict[str, Any]] = None
+    status: str = "draft"
+    simrs_sync_status: str = "pending"
+    simrs_log_id: Optional[str] = None
+    simrs_response: Optional[Dict[str, Any]] = None
+    created_at: str
+    updated_at: str
+    synced_at: Optional[str] = None
+
+class TempSOAPUpdateRequest(BaseModel):
+    soap_content: Optional[TempSOAPContentSchema] = None
+    raw_markdown: Optional[str] = None
+    status: Optional[str] = None
+
+class TempSOAPCommitResponse(BaseModel):
+    status: str
+    message: str
+    temp_soap: TempSOAPRecordSchema
+    simrs_response: Optional[Dict[str, Any]] = None
+
 class AgentChatResponse(BaseModel):
     session_id: str
     user_query: str
@@ -70,5 +113,6 @@ class AgentChatResponse(BaseModel):
     workflow_type: Optional[str] = None
     audio_transcript: Optional[str] = None
     soa_note: Optional[SOANoteSchema] = None
+    temp_soap: Optional[TempSOAPRecordSchema] = None
     output_validation: Optional[OutputValidationSchema] = None
     structured_output: Optional[Dict[str, Any]] = None

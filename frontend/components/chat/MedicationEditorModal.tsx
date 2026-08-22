@@ -1118,10 +1118,10 @@ export default function MedicationEditorModal({
             <button
               type="button"
               onClick={handleSave}
-              className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-md hover:shadow-lg cursor-pointer"
+              className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-md hover:shadow-lg"
             >
-              <span>📤</span>
-              <span>Kirim ke SIMRS</span>
+              <span>💾</span>
+              <span>Simpan & Perbarui Rekomendasi Terapi</span>
             </button>
           </div>
         </div>

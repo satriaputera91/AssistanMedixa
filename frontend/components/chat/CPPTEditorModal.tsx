@@ -60,6 +60,24 @@ export function parseSOAPFromAIText(
     return '';
   };
 
+  // 0. Top Priority: Extract directly from Temporary SOAP (temp_soap) record in metadata
+  if (allMessages && allMessages.length > 0) {
+    for (let idx = allMessages.length - 1; idx >= 0; idx--) {
+      const msg = allMessages[idx];
+      const tempSoap = msg.metadata?.temp_soap;
+      if (tempSoap && tempSoap.soap_content) {
+        const sc = tempSoap.soap_content;
+        return {
+          subjective: sc.subjective || '',
+          objective: sc.objective || '',
+          assessment: sc.assessment || '',
+          plan: sc.plan || '',
+          instructions: sc.instructions || '',
+        };
+      }
+    }
+  }
+
   // 1. Priority pass: Extract from structured Pydantic Output if available in allMessages
   if (allMessages && allMessages.length > 0) {
     for (let idx = allMessages.length - 1; idx >= 0; idx--) {
@@ -284,11 +302,11 @@ export function parseSOAPFromAIText(
   }
 
   return {
-    subjective: s || '- Keluhan Utama: Pasien datang untuk kontrol berkala.\n- Riwayat Penyakit Sekarang: Evaluasi keluhan klinis.',
-    objective: o || '- Tanda-Tanda Vital: Dalam batas evaluasi klinis.\n- Hasil Pemeriksaan Penunjang: Evaluasi laboratorium terlampir.',
-    assessment: a || '- Diagnosis Kerja: Evaluasi klinis dan kodefikasi ICD-10.',
-    plan: p || '- Terapi Farmakoterapi & Rencana Penatalaksanaan Lanjutan.',
-    instructions: i_inst || '- Edukasi kepatuhan minum obat teratur.\n- Kontrol poliklinik berkala dalam 2-4 minggu.\n- Segera ke IGD bila timbul tanda bahaya (red flags).'
+    subjective: s || '',
+    objective: o || '',
+    assessment: a || '',
+    plan: p || '',
+    instructions: i_inst || ''
   };
 }
 
@@ -700,14 +718,6 @@ export function extractPatientPlanCategories(
   }
 
   const result = [];
-  if (patientItems.length > 0) {
-    result.push({
-      category: 'Rekomendasi Terapi & Plan AI Pasien Ini',
-      icon: '🌟',
-      items: patientItems,
-    });
-  }
-
   result.push(...PLAN_CATEGORIES);
   return result;
 }
@@ -1078,6 +1088,29 @@ export default function CPPTEditorModal({
     () => extractPatientPlanCategories(patient, messages?.map(m => ({ role: m.role, content: m.content }))),
     [patient, messages]
   );
+
+  const displayedPlanCategories = React.useMemo(() => {
+    if (selectedPlanCategory === 'all') return planCategories;
+    return planCategories.filter((c) => c.category === selectedPlanCategory);
+  }, [planCategories, selectedPlanCategory]);
+
+  const handleTogglePlanItem = (item: { label: string; text: string }) => {
+    const cleanText = item.text.replace(/^- /, '');
+    setPlan((prev) => {
+      const trimmed = prev.trim();
+      if (!trimmed) return item.text;
+      if (trimmed.includes(cleanText)) {
+        // Toggle off if already included
+        const filtered = trimmed
+          .split('\n')
+          .filter((line) => !line.includes(cleanText))
+          .join('\n')
+          .trim();
+        return filtered;
+      }
+      return `${trimmed}\n${item.text}`;
+    });
+  };
 
   const appendSubjectiveAnamnesis = (anamText: string) => {
     setSubjective((prev) => {
@@ -1543,7 +1576,7 @@ export default function CPPTEditorModal({
                     className="px-2.5 py-1 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-xs active:scale-95 cursor-pointer"
                   >
                     <span>➕</span>
-                    <span>Tambah Manual (ICD-10)</span>
+                    <span>Tambah Diagnosis (ICD-10)</span>
                   </button>
                 </div>
               </div>
@@ -1638,116 +1671,113 @@ export default function CPPTEditorModal({
                   <button
                     type="button"
                     onClick={() => setShowPlanPicker(!showPlanPicker)}
-                    className="px-2.5 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-xs"
+                    className="px-2.5 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-xs active:scale-95 cursor-pointer"
                   >
                     <span>{showPlanPicker ? '✕' : '➕'}</span>
-                    <span>{showPlanPicker ? 'Tutup Panel Plan' : 'Tambah Rekomendasi Plan AI'}</span>
+                    <span>{showPlanPicker ? 'Tutup Panel Plan' : 'Template & Kustom Plan'}</span>
                   </button>
                 </div>
               </div>
 
-              {/* Interactive Plan & AI Therapy Quick-Insert Picker */}
+              {/* Interactive Plan Template & Custom Doctor Input Panel */}
               {showPlanPicker && (
-                <div className="p-3.5 rounded-2xl border border-indigo-200/90 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 space-y-3 shadow-xs animate-in fade-in-50 duration-150">
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <span className="text-[11px] font-bold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
-                      <span>💡</span>
-                      <span>Katalog Rekomendasi Terapi Obat, Workup, & Plan AI:</span>
+                <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-indigo-300 dark:border-slate-700 shadow-sm space-y-3 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="flex items-center justify-between border-b border-indigo-100 dark:border-slate-800 pb-2">
+                    <span className="text-xs font-bold text-indigo-950 dark:text-indigo-300 flex items-center gap-1.5">
+                      <span>💊</span>
+                      <span>Katalog Template Plan & Terapi Klinis (Klik untuk Memilih/Menyisipkan)</span>
                     </span>
-                    <span className="text-[10px] text-indigo-600 dark:text-slate-400">
-                      Klik badge untuk menyisipkan ke Plan
-                    </span>
-                  </div>
-
-                  {/* Filter Category Pills */}
-                  <div className="flex flex-wrap gap-1.5 border-b border-indigo-100 dark:border-slate-800 pb-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedPlanCategory('all')}
-                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all ${selectedPlanCategory === 'all'
-                        ? 'bg-indigo-600 text-white shadow-2xs'
-                        : 'bg-indigo-50 dark:bg-slate-800 text-indigo-900 dark:text-indigo-300 hover:bg-indigo-100'
-                        }`}
-                    >
-                      Semua Kategori
-                    </button>
-                    {planCategories.map((c) => (
+                    <div className="flex items-center gap-1 overflow-x-auto max-w-[65%] py-0.5">
                       <button
-                        key={c.category}
                         type="button"
-                        onClick={() => setSelectedPlanCategory(c.category)}
-                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 ${selectedPlanCategory === c.category
+                        onClick={() => setSelectedPlanCategory('all')}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all shrink-0 ${selectedPlanCategory === 'all'
                           ? 'bg-indigo-600 text-white shadow-2xs'
-                          : c.category.includes('Pasien Ini')
-                            ? 'bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700'
-                            : 'bg-indigo-50 dark:bg-slate-800 text-indigo-900 dark:text-indigo-300 hover:bg-indigo-100'
+                          : 'bg-indigo-50 dark:bg-slate-800 text-indigo-800 dark:text-slate-300 hover:bg-indigo-100 dark:hover:bg-slate-700'
                           }`}
                       >
-                        <span>{c.icon}</span>
-                        <span>{c.category}</span>
+                        Semua
                       </button>
+                      {planCategories.map((c) => (
+                        <button
+                          key={c.category}
+                          type="button"
+                          onClick={() => setSelectedPlanCategory(c.category)}
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all shrink-0 flex items-center gap-1 ${selectedPlanCategory === c.category
+                            ? 'bg-indigo-600 text-white shadow-2xs'
+                            : c.category.includes('Pasien Ini') || c.category.includes('AI')
+                              ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
+                              : 'bg-indigo-50 dark:bg-slate-800 text-indigo-800 dark:text-slate-300 hover:bg-indigo-100 dark:hover:bg-slate-700'
+                            }`}
+                        >
+                          <span>{c.icon}</span>
+                          <span>{c.category.split(' ')[0] || c.category}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Plan Items List */}
+                  <div className="max-h-56 overflow-y-auto space-y-3 pr-1">
+                    {displayedPlanCategories.map((cat) => (
+                      <div key={cat.category} className="space-y-1.5">
+                        <div className="text-[11px] font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1">
+                          <span>{cat.icon}</span>
+                          <span>{cat.category}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {cat.items.map((item, idx) => {
+                            const cleanText = item.text.replace(/^- /, '');
+                            const isAlreadyIncluded = plan.includes(cleanText) || (item.label && plan.includes(item.label));
+                            return (
+                              <button
+                                key={`${item.label}-${idx}`}
+                                type="button"
+                                onClick={() => handleTogglePlanItem(item)}
+                                className={`px-2.5 py-1.5 rounded-xl text-[11px] font-medium border text-left flex items-center gap-1.5 transition-all cursor-pointer ${isAlreadyIncluded
+                                  ? 'bg-indigo-100 dark:bg-indigo-950/70 border-indigo-400 dark:border-indigo-600 text-indigo-950 dark:text-indigo-200 font-bold shadow-2xs'
+                                  : cat.category.includes('Pasien Ini') || cat.category.includes('AI')
+                                    ? 'bg-amber-50/80 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900 border-amber-300 dark:border-amber-700 text-amber-950 dark:text-amber-200 hover:scale-[1.01]'
+                                    : 'bg-indigo-50/70 dark:bg-slate-800/80 hover:bg-indigo-100 dark:hover:bg-slate-700 border-indigo-200 dark:border-slate-700 text-indigo-950 dark:text-slate-200 hover:scale-[1.01]'
+                                  }`}
+                              >
+                                <span className={`font-bold ${isAlreadyIncluded ? 'text-indigo-700 dark:text-indigo-300' : 'text-indigo-500'}`}>
+                                  {isAlreadyIncluded ? '✓' : '+'}
+                                </span>
+                                <span>{item.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     ))}
                   </div>
 
-                  {/* Plan Items Grid */}
-                  <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
-                    {planCategories
-                      .filter((c) => selectedPlanCategory === 'all' || selectedPlanCategory === c.category)
-                      .map((cat) => (
-                        <div key={cat.category} className="space-y-1">
-                          <div className="text-[10px] font-bold text-indigo-800 dark:text-indigo-300 uppercase tracking-wider flex items-center gap-1">
-                            <span>{cat.icon}</span>
-                            <span>{cat.category}</span>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {cat.items.map((item, idx) => {
-                              const isAlreadyIncluded = plan.includes(item.text.trim());
-                              return (
-                                <button
-                                  key={idx}
-                                  type="button"
-                                  onClick={() => appendPlanItem(item.text)}
-                                  className={`px-2.5 py-1 rounded-xl text-[11px] font-medium border text-left flex items-center gap-1.5 transition-all ${isAlreadyIncluded
-                                    ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300 font-semibold'
-                                    : cat.category.includes('Pasien Ini')
-                                      ? 'bg-amber-50/80 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900 border-amber-300 dark:border-amber-700 text-amber-950 dark:text-amber-200 hover:scale-[1.01]'
-                                      : 'bg-indigo-50/70 dark:bg-slate-800/80 hover:bg-indigo-100 dark:hover:bg-slate-700 border-indigo-200 dark:border-slate-700 text-indigo-950 dark:text-slate-200 hover:scale-[1.01]'
-                                    }`}
-                                >
-                                  <span>{isAlreadyIncluded ? '✓' : '+'}</span>
-                                  <span>{item.label}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-
-                  {/* Custom Plan Adder */}
+                  {/* Custom Plan Doctor Input Section */}
                   <div className="pt-2 border-t border-indigo-100 dark:border-slate-800 flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-bold text-indigo-800 dark:text-indigo-400 shrink-0">
-                      Plan Kustom:
+                    <span className="text-[10px] font-bold text-indigo-900 dark:text-indigo-300 shrink-0 flex items-center gap-1">
+                      <span>✏️</span>
+                      <span>Plan Kustom Dokter:</span>
                     </span>
                     <input
                       type="text"
                       value={customPlanLabel}
                       onChange={(e) => setCustomPlanLabel(e.target.value)}
-                      placeholder="Kategori / Judul (cth: Profil Besi / EGD Ulang)"
-                      className="px-2.5 py-1 text-xs rounded-lg border border-indigo-200 dark:border-slate-700 bg-indigo-50/40 dark:bg-slate-800 text-slate-900 dark:text-slate-100 flex-1 min-w-[140px] focus:outline-none focus:border-indigo-500"
+                      placeholder="Kategori / Label (cth: Obat / Lab / Terapi)"
+                      className="px-2.5 py-1 text-xs rounded-lg border border-indigo-200 dark:border-slate-700 bg-indigo-50/40 dark:bg-slate-800 text-slate-900 dark:text-slate-100 w-36 sm:w-44 focus:outline-none focus:border-indigo-500"
                     />
                     <input
                       type="text"
                       value={customPlanValue}
                       onChange={(e) => setCustomPlanValue(e.target.value)}
-                      placeholder="Instruksi Rencana / Terapi (cth: LFT & Elektrolit 3 hari lagi)"
-                      className="px-2.5 py-1 text-xs rounded-lg border border-indigo-200 dark:border-slate-700 bg-indigo-50/40 dark:bg-slate-800 text-slate-900 dark:text-slate-100 flex-1 min-w-[160px] focus:outline-none focus:border-indigo-500"
+                      placeholder="Uraian Rencana Terapi / Resep / Dosis / Tindakan..."
+                      className="px-2.5 py-1 text-xs rounded-lg border border-indigo-200 dark:border-slate-700 bg-indigo-50/40 dark:bg-slate-800 text-slate-900 dark:text-slate-100 flex-1 min-w-[180px] focus:outline-none focus:border-indigo-500"
                     />
                     <button
                       type="button"
                       onClick={handleAddCustomPlan}
                       disabled={!customPlanLabel.trim() && !customPlanValue.trim()}
-                      className="px-3 py-1 rounded-lg bg-indigo-700 hover:bg-indigo-600 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-2xs shrink-0"
+                      className="px-3.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-2xs shrink-0 cursor-pointer active:scale-95"
                     >
                       + Sisipkan
                     </button>
@@ -1917,7 +1947,7 @@ export default function CPPTEditorModal({
               ) : (
                 <>
                   <span>✅</span>
-                  <span>Konfirmasi & Kirim ke SIMRS (MCP)</span>
+                  <span>Konfirmasi & Kirim ke SIMRS</span>
                 </>
               )}
             </button>
@@ -2175,6 +2205,6 @@ export default function CPPTEditorModal({
         )}
 
       </div>
-    </div>
+    </div >
   );
 }

@@ -469,10 +469,10 @@ export default function AnamnesisEditorModal({
             <button
               type="button"
               onClick={handleSave}
-              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5"
             >
-              <span>📤</span>
-              <span>Kirim ke SIMRS</span>
+              <span>💾</span>
+              <span>Simpan & Perbarui Anamnesis</span>
             </button>
           </div>
         </div>

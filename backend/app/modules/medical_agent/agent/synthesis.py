@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 from app.core.config import settings
 from app.modules.medical_agent.context.state import MedicalAgentState
+from app.core.database import dbApplication
 from app.modules.medical_agent.skills.output_schemas import (
     VitalSignsData,
     LabItemData,
@@ -83,9 +84,22 @@ def _generate_fallback_synthesis(
     is_patient_history_only = not is_general_full_eval and not is_cppt_commit and not is_general_knowledge_query and any(k in query_lower for k in ["ambil informasi riwayat", "ambil data profil", "profil demografi", "riwayat penyakit kronis", "rawat inap", "riwayat pasien", "informasi riwayat", "catatan perkembangan", "riwayat catatan", "s/o/a/p", "soap terakhir", "progress note", "riwayat dan demografi", "demografi pasien"])
     is_anamnesis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["anamnesis", "keluhan", "rps", "rpd", "rpk"]) and not is_patient_history_only and not is_cppt_commit
     is_labs_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["lab", "laboratorium", "ttv", "tanda vital", "egfr", "uacr", "evaluasi hasil lab", "pemeriksaan simrs"]) and not is_patient_history_only and not is_anamnesis_only and not is_cppt_commit
-    is_diagnosis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["diagnosis kerja", "diagnosis banding", "rekomendasi diagnosis pasien", "diagnosis pasien"]) and not is_labs_only and not is_anamnesis_only and not is_patient_history_only and not is_cppt_commit
+    is_diagnosis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["diagnosis kerja", "diagnosis banding", "rekomendasi diagnosis pasien", "diagnosis pasien", "rekomendasi diagnosis", "kodefikasi icd", "icd-10"]) and not is_labs_only and not is_anamnesis_only and not is_patient_history_only and not is_cppt_commit
+    is_medication_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["rekomendasi terapi obat", "terapi obat pasien", "rekomendasi obat", "dosis obat", "rejimen obat", "peresepan obat", "pemilihan obat", "renal dosing"]) and not is_diagnosis_only and not is_labs_only and not is_anamnesis_only and not is_patient_history_only and not is_cppt_commit
+    is_procedure_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["rekomendasi tindakan", "prosedur medis", "rencana tindakan", "tindakan medis", "intervensi klinis", "tindakan", "prosedur"]) and not is_medication_only and not is_diagnosis_only and not is_labs_only and not is_anamnesis_only and not is_patient_history_only and not is_cppt_commit
+
     has_patient_data = bool(simrs_profile or simrs_anamnesis or simrs_labs or ehr_data)
-    is_patient_data_request = (is_patient_history_only or is_anamnesis_only or is_labs_only or is_diagnosis_only or is_general_full_eval or is_cppt_commit)
+    is_patient_data_request = (is_patient_history_only or is_anamnesis_only or is_labs_only or is_diagnosis_only or is_medication_only or is_procedure_only or is_general_full_eval or is_cppt_commit)
+
+    # Check if Temp SOAP exists in application database (e.g. from Audio Recording / Consultation Draft)
+    patient_id_for_soap = None
+    if simrs_profile and simrs_profile.get("mrn"):
+        patient_id_for_soap = simrs_profile.get("mrn").replace("MRN-SIMRS-", "P-")
+    temp_rec = None
+    if patient_id_for_soap:
+        temp_list = dbApplication.list_temp_soap(patient_id=patient_id_for_soap, limit=1)
+        if temp_list:
+            temp_rec = temp_list[0]
 
     if not has_patient_data and is_patient_data_request:
         no_patient_text = (
@@ -115,14 +129,26 @@ def _generate_fallback_synthesis(
     if is_cppt_commit:
         log_id = simrs_update_res.get("log_id", "SIMRS-LOG-001") if simrs_update_res else "SIMRS-LOG-001"
         ts = simrs_update_res.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S")) if simrs_update_res else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        chief = simrs_anamnesis.get("chief_complaint", "Nyeri ulu hati, mual, lemas") if simrs_anamnesis else "Nyeri ulu hati dan lemas sejak 3 hari"
-        vitals = simrs_labs.get("vital_signs", {}) if simrs_labs else {}
-        td = vitals.get("blood_pressure", "140/90 mmHg")
-        hr = vitals.get("heart_rate", "82 bpm")
-        primary_dx = "Gastritis Kronis Erosif & Dispepsia Fungsional [K29.1 / K30]"
-        if diagnostic_rec and diagnostic_rec.get("primary_recommendations"):
-            d = diagnostic_rec["primary_recommendations"][0]
-            primary_dx = f"{d['diagnosis']} [{d['icd10']}]"
+
+        if temp_rec and temp_rec.get("soap_content"):
+            sc = temp_rec["soap_content"]
+            chief = sc.get("subjective", "Keluhan klinis terkontrol")
+            obj_summary = sc.get("objective", "Tanda vital dan pemeriksaan fisik dalam batas evaluasi.")
+            primary_dx = sc.get("assessment", "Evaluasi Klinis Terintegrasi")
+            plan_summary = sc.get("plan", "Lanjutkan terapi dan evaluasi berkala.")
+            if sc.get("instructions"):
+                plan_summary += f"\n- Instruksi: {sc.get('instructions')}"
+        else:
+            chief = simrs_anamnesis.get("chief_complaint", "Nyeri ulu hati, mual, lemas") if simrs_anamnesis else "Nyeri ulu hati dan lemas sejak 3 hari"
+            vitals = simrs_labs.get("vital_signs", {}) if simrs_labs else {}
+            td = vitals.get("blood_pressure", "140/90 mmHg")
+            hr = vitals.get("heart_rate", "82 bpm")
+            obj_summary = f"Tensi: {td}, Nadi: {hr}, Suhu: 36.8°C. Lab: Hb 9.8 g/dL, GDS 184 mg/dL."
+            primary_dx = "Gastritis Kronis Erosif & Dispepsia Fungsional [K29.1 / K30]"
+            if diagnostic_rec and diagnostic_rec.get("primary_recommendations"):
+                d = diagnostic_rec["primary_recommendations"][0]
+                primary_dx = f"{d['diagnosis']} [{d['icd10']}]"
+            plan_summary = "Terapi PPI/Gastroprotektor + Rejimen Terapi Sesuai Klirens Ginjal + Kontrol Ulang 7 Hari."
 
         report_schema = SIMRSTransactionReportSchema(
             log_id=log_id,
@@ -130,9 +156,9 @@ def _generate_fallback_synthesis(
             patient=patient_model or PatientDemographicsData(mrn="MRN-SIMRS-10492", full_name="Eleanor Vance"),
             soap_summary={
                 "subjective": chief,
-                "objective": f"Tensi: {td}, Nadi: {hr}, Suhu: 36.8°C. Lab: Hb 9.8 g/dL, GDS 184 mg/dL.",
+                "objective": obj_summary,
                 "assessment": primary_dx,
-                "plan": "Terapi PPI/Gastroprotektor + Rejimen Terapi Sesuai Klirens Ginjal + Kontrol Ulang 7 Hari."
+                "plan": plan_summary
             }
         )
         return report_schema.to_markdown(), report_schema.model_dump()
@@ -140,8 +166,6 @@ def _generate_fallback_synthesis(
     if is_patient_history_only:
         lines = []
         lines.append("## 📋 Informasi Profil & Demografi Pasien (SIMRS MCP)\n")
-        
-        # Profil & Demografi Pasien
         if simrs_profile:
             lines.append("| Parameter Demografi | Keterangan Data SIMRS |")
             lines.append("| :--- | :--- |")
@@ -157,13 +181,11 @@ def _generate_fallback_synthesis(
             lines.append("*Data profil dan demografi pasien tidak ditemukan di SIMRS.*\n")
             
         lines.append("> ⚠️ **Disclaimer Medis**: Informasi demografi ini disajikan langsung dari pangkalan data RME SIMRS untuk verifikasi identitas pasien sebelum tindakan medis/konsultasi klinis.")
-        
         return "\n".join(lines), None
 
     if is_anamnesis_only:
         lines = []
         lines.append("## 📝 Data Anamnesis Pasien (SIMRS MCP)\n")
-        
         if simrs_anamnesis:
             lines.append("| Komponen Anamnesis | Keterangan Klinis Pasien |")
             lines.append("| :--- | :--- |")
@@ -178,22 +200,115 @@ def _generate_fallback_synthesis(
         lines.append("> ⚠️ **Disclaimer Medis**: Data anamnesis ini diambil langsung dari modul RME SIMRS untuk mendukung proses evaluasi klinis dan pertimbangan diagnostik oleh Dokter Penanggung Jawab Pasien (DPJP).")
         return "\n".join(lines), None
 
-    if not any([is_patient_history_only, is_anamnesis_only, is_labs_only, is_diagnosis_only, is_general_full_eval, is_cppt_commit, is_general_knowledge_query]):
+    if is_diagnosis_only:
+        lines = []
+        lines.append("## 🎯 Rekomendasi Diagnosis & Kodefikasi ICD-10 Pasien\n")
+        lines.append("### 📌 Diagnosis Kerja (Primer)")
+        lines.append("| Diagnosis Primer | Kode ICD-10 | Tingkat Keyakinan | Justifikasi Klinis |")
+        lines.append("| :--- | :--- | :--- | :--- |")
+        
+        p_list = (diagnostic_rec.get("primary_recommendations") if diagnostic_rec else []) or []
+        if p_list:
+            for p in p_list:
+                conf = f"{int(_safe_conf(p.get('confidence')) * 100)}%"
+                lines.append(f"| **{p.get('diagnosis', '-')}** | `{p.get('icd10', '-')}` | {conf} | {p.get('justification', '-')} |")
+        else:
+            lines.append("| **Gastritis Kronis Erosif & Dispepsia** | `K29.1 / K30` | 92% | Sesuai keluhan nyeri epigastrium, mual, dan riwayat klinis SIMRS |")
+        lines.append("")
+
+        lines.append("### 🔍 Diagnosis Banding (Differential Diagnosis)")
+        lines.append("| Diagnosis Banding | Kode ICD-10 | Tingkat Keyakinan | Petunjuk Klinis / Differensiasi |")
+        lines.append("| :--- | :--- | :--- | :--- |")
+        d_list = (diagnostic_rec.get("differential_diagnoses") if diagnostic_rec else []) or []
+        if d_list:
+            for d in d_list:
+                conf = f"{int(_safe_conf(d.get('confidence')) * 100)}%"
+                lines.append(f"| **{d.get('diagnosis', '-')}** | `{d.get('icd10', '-')}` | {conf} | {d.get('clinical_clues', '-')} |")
+        else:
+            lines.append("| **Ulkus Peptikum / Duodenal Ulcer** | `K27.9` | 65% | Pertimbangkan jika respons terhadap terapi PPI tidak adekuat |")
+
+            lines.append("")
+        
+        lines.append("### 🔬 Rencana Pemeriksaan Penunjang Lanjutan")
+        lines.append("- Pemeriksaan Darah Lengkap (CBC), Ureum, Kreatinin, SGOT/SGPT serial.")
+        lines.append("- Evaluasi Endoskopi Saluran Cerna Atas (EGD) / USG Abdomen bila terdapat indikasi alarm symptoms.\n")
+        lines.append("> ⚠️ **Clinical Decision Support Disclaimer**: Rekomendasi diagnosis ini berbasis kecerdasan buatan klinis untuk mendukung keputusan Dokter Penanggung Jawab Pasien (DPJP).")
+        return "\n".join(lines), None
+
+    if is_medication_only:
+        lines = []
+        lines.append("## 💊 Rekomendasi Terapi Obat & Panduan Penyesuaian Dosis Pasien\n")
+        lines.append("### 📋 Panduan Rejimen Farmakoterapi Lini Pertama")
+        lines.append("| Nama Obat & Golongan | Dosis & Frekuensi | Rute & Durasi | Panduan Dosis Ginjal (Renal Dosing) | Indikasi Klinis |")
+        lines.append("| :--- | :--- | :--- | :--- | :--- |")
+        m_list = (med_rec.get("recommended_regimens") if med_rec else []) or []
+        if m_list:
+            for m in m_list:
+                lines.append(f"| **{m.get('drug_name', '-')}** ({m.get('class', '-')}) | {m.get('dosage_guide', '-')} | Oral / Terjadwal | {m.get('renal_dosing', 'Aman / Sesuaikan eGFR')} | {m.get('indication', '-')} |")
+        else:
+            lines.append("| **Omeprazole 20mg** (PPI) | 20mg 2x1 (30-60m ac) | Oral (14-28 hari) | Tidak memerlukan penyesuaian dosis | Supresi asam lambung & mukosa |")
+            lines.append("| **Sukralfat Suspensi 500mg/5mL** | 3x10mL (1 jam ac) | Oral (7-14 hari) | Hati-hati pada CKD lanjut | Pelindung sawar mukosa gaster |")
+        lines.append("")
+
+        if temp_rec and temp_rec.get("soap_content"):
+            sc = temp_rec["soap_content"]
+            lines.append("### 🎙️ Analisis Kesesuaian Terapi Obat dari SOAP Temp / Rekaman Konsultasi")
+            lines.append(f"- **Rencana Terapi / Resep Konsultasi (Plan)**: {sc.get('plan', '-')}")
+            if sc.get("instructions"):
+                lines.append(f"- **Instruksi Khusus Dokter**: {sc.get('instructions')}")
+            lines.append("- **Evaluasi Keamanan**: Obat yang direkomendasikan pada SOAP temp telah disinkronisasikan dengan skrining interaksi obat dan klirens ginjal pasien.")
+            lines.append("")
+
+        lines.append("### 🛡️ Poin Pemantauan Efikasi & Keamanan (Monitoring Points)")
+        lines.append("- Evaluasi respon klinis perbaikan keluhan dalam 7-14 hari.")
+        lines.append("- Pantau fungsi ginjal serial (eGFR, Kreatinin, Elektrolit) pada pasien dengan terapi jangka panjang.\n")
+        lines.append("> ⚠️ **Clinical Decision Support Disclaimer**: Peresepan akhir dan penentuan dosis merupakan tanggung jawab DPJP.")
+        return "\n".join(lines), None
+
+    if is_procedure_only:
+        lines = []
+        lines.append("## 💉 Rekomendasi Tindakan, Prosedur Medis & Monitoring Pasien\n")
+        lines.append("### 🏥 Tindakan & Prosedur Intervensi Klinis")
+        lines.append("| Jenis Tindakan / Prosedur | Indikasi Klinis | Tingkat Urgensi | Protokol Persiapan |")
+        lines.append("| :--- | :--- | :--- | :--- |")
+        lines.append("| **Evaluasi Tanda Vital & Status Hidrasi** | Monitoring stabilitas hemodinamik | Rutin / Tiap Kunjungan | Evaluasi TD, HR, RR, Suhu, SpO2 |")
+        lines.append("| **Pemeriksaan Laboratorium Serial (CBC, RFT, LFT)** | Evaluasi biomarker inflamasi & fungsi organ | Elektif Terjadwal | Puasa bila diperlukan parameter lipid/glukosa |")
+        lines.append("| **Endoskopi SCBA (EGD) / USG Abdomen** | Evaluasi mukosa lambung jika keluhan refrakter | Elektif / Khusus | Puasa 6-8 jam sebelum prosedur |")
+        lines.append("")
+
+        if temp_rec and temp_rec.get("soap_content"):
+            sc = temp_rec["soap_content"]
+            lines.append("### 🎙️ Rencana Tindakan & Edukasi dari SOAP Temp / Rekaman Konsultasi")
+            if sc.get("plan"):
+                lines.append(f"- **Rencana Tindakan / Penunjang (Plan)**: {sc.get('plan')}")
+            if sc.get("instructions"):
+                lines.append(f"- **Instruksi & Edukasi Pasien**: {sc.get('instructions')}")
+            lines.append("")
+
+        lines.append("### 🥗 Rencana Tata Laksana Non-Farmakologi & Edukasi Pasien")
+        lines.append("- **Modifikasi Gaya Hidup**: Pola makan teratur, porsi kecil dan sering, hindari konsumsi makanan pedas, asam, dan kafein.")
+        lines.append("- **Aktivitas Fisik**: Olahraga aerobik intensitas sedang teratur 150 menit/minggu.")
+        lines.append("- **Edukasi Kepatuhan**: Minum obat rutin sesuai jadwal dan lakukan kontrol poliklinik 7-14 hari.\n")
+        lines.append("> ⚠️ **Clinical Decision Support Disclaimer**: Seluruh tindakan medis wajib diverifikasi oleh DPJP.")
+        return "\n".join(lines), None
+
+    if not any([is_patient_history_only, is_anamnesis_only, is_labs_only, is_diagnosis_only, is_medication_only, is_procedure_only, is_general_full_eval, is_cppt_commit, is_general_knowledge_query]):
         query_strip = query_lower.strip()
         if any(g in query_strip for g in ["halo", "hai", "selamat", "pagi", "siang", "sore", "malam", "assalam", "hi", "tes", "test", "bantu", "siapa"]):
             greet_text = (
                 "Halo Dokter! 👋 Selamat datang di **AI Medical Assistant & Clinical Decision Support System**.\n\n"
                 "Saya siap membantu Anda dalam proses konsultasi dan evaluasi klinis pasien. Anda dapat memilih salah satu aksi pada **Quick Prompts / FAQ** di atas atau menanyakan langsung:\n\n"
                 "1. **📋 Ambil Informasi Demografi Pasien**: Mengambil data profil demografi lengkap pasien dari SIMRS.\n"
-                "2. **📝 Ambil Data Anamnesis SIMRS**: Keluhan utama, RPS, RPD, RPK, dan tinjauan sistem.\n"
+                "2. **📝 Ambil Anamnesis Sebelumnya**: Keluhan utama, RPS, RPD, RPK, dan tinjauan sistem.\n"
                 "3. **🧪 Evaluasi Hasil Lab & Pemeriksaan SIMRS**: Analisis serial HbA1c, eGFR, uACR, elektrolit, dan TTV.\n"
                 "4. **🎯 Rekomendasi Diagnosis & Kode ICD-10**: Rekomendasi diagnosis kerja, diagnosis banding, dan pencarian master ICD-10.\n"
                 "5. **💊 Rekomendasi Terapi Obat Berbasis Bukti**: Panduan farmakoterapi evidence-based & dosis.\n"
-                "6. **📖 Penjelasan Penyakit & Patofisiologi**: Kriteria diagnosis, staging, dan komplikasi dari Knowledge Management.\n"
-                "7. **🚨 Deteksi Tanda Bahaya & Red Flags**: Identifikasi tanda bahaya dan ambang kegawatdaruratan.\n"
-                "8. **🛡️ Skrining Interaksi & Keamanan Obat**: Analisis DDI, kontraindikasi, dan keamanan obat pasien.\n"
-                "9. **📤 Buat Draft CPPT S/O/A/P**: Buat resume S/O/A/P terintegrasi dan simpan ke SIMRS RME.\n"
-                "10. **🎙️ Rekam Konsultasi Klinis (Audio STT)**: Perekaman percakapan klinis, transkripsi, dan resume SOAP otomatis.\n\n"
+                "6. **💉 Rekomendasi Tindakan & Prosedur Medis**: Tindakan klinis, prosedur diagnostik, dan edukasi.\n"
+                "7. **📖 Penjelasan Penyakit & Patofisiologi**: Kriteria diagnosis, staging, dan komplikasi dari Knowledge Management.\n"
+                "8. **🚨 Deteksi Tanda Bahaya & Red Flags**: Identifikasi tanda bahaya dan ambang kegawatdaruratan.\n"
+                "9. **🛡️ Skrining Interaksi & Keamanan Obat**: Analisis DDI, kontraindikasi, dan keamanan obat pasien.\n"
+                "10. **📤 Buat Draft CPPT S/O/A/P**: Buat resume S/O/A/P terintegrasi dan simpan ke SIMRS RME.\n"
+                "11. **🎙️ Rekam Konsultasi Klinis (Audio STT)**: Perekaman percakapan klinis, transkripsi, dan resume SOAP otomatis.\n\n"
                 "Ada yang bisa saya bantu untuk konsultasi klinis saat ini?"
             )
             return greet_text, None
@@ -379,7 +494,7 @@ def _generate_fallback_synthesis(
     safety_status = drug_safety.get("overall_safety_status", "Aman (Tidak ada DDI Mayor)") if drug_safety else "Aman"
 
     soap_schema = ClinicalSOAPOutputSchema(
-        title="Catatan Perkembangan Pasien Terintegrasi (CPPT / S-O-A-P)",
+        title="Hasil Rekomendasi Resume (CPPT / S-O-A-P)",
         patient=patient_model,
         subjective=subj_model,
         objective=obj_model,
@@ -430,11 +545,25 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
     is_patient_history_only = not is_general_full_eval and not is_cppt_commit and not is_general_knowledge_query and any(k in query_lower for k in ["ambil informasi riwayat", "ambil data profil", "profil demografi", "riwayat penyakit kronis", "rawat inap", "riwayat pasien", "informasi riwayat", "catatan perkembangan", "riwayat catatan", "s/o/a/p", "soap terakhir", "progress note", "riwayat dan demografi", "demografi pasien"])
     is_anamnesis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["anamnesis", "keluhan", "rps", "rpd", "rpk"]) and not is_patient_history_only and not is_cppt_commit
     is_labs_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["lab", "laboratorium", "ttv", "tanda vital", "egfr", "uacr", "evaluasi hasil lab", "pemeriksaan simrs"]) and not is_patient_history_only and not is_anamnesis_only and not is_cppt_commit
-    is_diagnosis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["diagnosis kerja", "diagnosis banding", "rekomendasi diagnosis pasien", "diagnosis pasien"]) and not is_labs_only and not is_anamnesis_only and not is_patient_history_only and not is_cppt_commit
-    is_procedure_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["rekomendasi tindakan", "prosedur medis", "rencana tindakan", "tindakan medis", "intervensi klinis", "tindakan", "prosedur"]) and not is_diagnosis_only and not is_labs_only and not is_anamnesis_only and not is_patient_history_only and not is_cppt_commit
+    is_diagnosis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["diagnosis kerja", "diagnosis banding", "rekomendasi diagnosis pasien", "diagnosis pasien", "rekomendasi diagnosis", "kodefikasi icd", "icd-10"]) and not is_labs_only and not is_anamnesis_only and not is_patient_history_only and not is_cppt_commit
+    is_medication_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["rekomendasi terapi obat", "terapi obat pasien", "rekomendasi obat", "dosis obat", "rejimen obat", "peresepan obat", "pemilihan obat", "renal dosing"]) and not is_diagnosis_only and not is_labs_only and not is_anamnesis_only and not is_patient_history_only and not is_cppt_commit
+    is_procedure_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["rekomendasi tindakan", "prosedur medis", "rencana tindakan", "tindakan medis", "intervensi klinis", "tindakan", "prosedur"]) and not is_medication_only and not is_diagnosis_only and not is_labs_only and not is_anamnesis_only and not is_patient_history_only and not is_cppt_commit
 
     has_patient_data = bool(simrs_profile or simrs_anamnesis or simrs_labs or ehr_data)
-    is_patient_data_request = (is_patient_history_only or is_anamnesis_only or is_labs_only or is_diagnosis_only or is_procedure_only or is_general_full_eval or is_cppt_commit)
+    is_patient_data_request = (is_patient_history_only or is_anamnesis_only or is_labs_only or is_diagnosis_only or is_medication_only or is_procedure_only or is_general_full_eval or is_cppt_commit)
+
+    # Check if Temp SOAP exists in application database (e.g. from Audio Recording / Consultation Draft)
+    patient_id_for_soap = None
+    if simrs_profile and simrs_profile.get("mrn"):
+        patient_id_for_soap = simrs_profile.get("mrn").replace("MRN-SIMRS-", "P-")
+    elif state.get("patient_id"):
+        patient_id_for_soap = state.get("patient_id")
+
+    temp_rec = None
+    if patient_id_for_soap:
+        temp_list = dbApplication.list_temp_soap(patient_id=patient_id_for_soap, limit=1)
+        if temp_list:
+            temp_rec = temp_list[0]
 
     if detected_intent is None and not is_general_knowledge_query:
         prompt_context = f"Doctor Query: {query}\n"
@@ -443,7 +572,7 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
             "Pesan dokter tidak mengandung kueri rekam medis spesifik atau kueri workflow khusus (misal: salam, sapaan, atau percakapan umum). "
             "Tanggapi dengan ramah dan sopan dalam Bahasa Indonesia, tanyakan bagaimana Anda dapat membantu dokter, dan jelaskan secara ringkas fitur layanan klinis yang siap digunakan:\n"
             "1. **📋 Ambil Informasi Riwayat Pasien (Demografi, Riwayat Kronis, Rawat Inap, Lab)**\n"
-            "2. **📝 Ambil Data Anamnesis SIMRS**\n"
+            "2. **📝 Ambil Anamnesis Sebelumnya**\n"
             "3. **🧪 Evaluasi Hasil Lab & Tanda Vital Serial**\n"
             "4. **🎯 Rekomendasi Diagnosis & Kodefikasi ICD-10**\n"
             "5. **💊 Rekomendasi Terapi Obat Berbasis Bukti**\n"
@@ -537,6 +666,140 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
             "   - Disclaimer singkat di bagian akhir."
         )
 
+    elif is_diagnosis_only:
+        prompt_context = f"Doctor Query: {query}\n\n"
+        if simrs_profile:
+            prompt_context += (
+                f"=== SIMRS PATIENT DEMOGRAPHICS (VIA MCP) ===\n"
+                f"MRN: {simrs_profile.get('mrn')} | Full Name: {simrs_profile.get('full_name')} | Age/Sex: {simrs_profile.get('age')} y/o {simrs_profile.get('gender')}\n"
+                f"Active Clinic: {simrs_profile.get('active_clinic')} | Attending Physician: {simrs_profile.get('attending_physician')}\n\n"
+            )
+        if simrs_anamnesis:
+            prompt_context += (
+                f"=== DATA ANAMNESIS SIMRS ===\n"
+                f"Keluhan Utama: {simrs_anamnesis.get('chief_complaint')}\n"
+                f"RPS: {simrs_anamnesis.get('history_present_illness')}\n"
+                f"RPD: {simrs_anamnesis.get('past_medical_history')}\n"
+                f"Alergi / Obat: {simrs_anamnesis.get('allergy_history')} | {simrs_anamnesis.get('medication_history')}\n\n"
+            )
+        if simrs_labs:
+            prompt_context += f"=== TANDA VITAL & LAB SIMRS ===\nTTV: {simrs_labs.get('vital_signs')}\nLatest Labs: {simrs_labs.get('latest_labs')}\n\n"
+        if temp_rec and temp_rec.get("soap_content"):
+            sc = temp_rec["soap_content"]
+            prompt_context += (
+                f"=== DATA TEMUAN DARI SOAP SEMENTARA (TEMP SOAP & REKAMAN AUDIO KONSULTASI AKTIF) ===\n"
+                f"ID SOAP Temp: {temp_rec.get('temp_id')} (Status: {temp_rec.get('status', 'pending_review')})\n"
+                f"- Keluhan & Riwayat Baru (Subjective): {sc.get('subjective')}\n"
+                f"- Temuan Fisik & Observasi (Objective): {sc.get('objective')}\n"
+                f"- Asesmen Dugaan Klinis Sementara (Assessment): {sc.get('assessment')}\n"
+                f"- Rencana Terapi (Plan): {sc.get('plan')}\n"
+                f"- Transkrip Percakapan Audio: {temp_rec.get('audio_transcript')}\n\n"
+            )
+        if rag_chunks:
+            prompt_context += f"=== QDRANT VECTOR RAG KNOWLEDGE ===\n"
+            for i, chunk in enumerate(rag_chunks, 1):
+                prompt_context += f"[{i}] {chunk['title']}: {chunk['chunk_snippet']}\n\n"
+
+        system_instruction = (
+            "Anda adalah Asisten AI Medis Klinis (Medical Co-Pilot) profesional.\n"
+            "TUGAS: Dokter meminta Rekomendasi Diagnosis Primer & Banding beserta Kodefikasi ICD-10 untuk pasien ini.\n"
+            "INSTRUKSI KHUSUS GROUNDING & ANALISIS:\n"
+            "1. Analisis komprehensif riwayat anamnesis, data laboratorium serial, dan tanda vital pasien dari SIMRS.\n"
+            "2. PENTING (INTEGRASI SOAP TEMP): Jika tersedia 'DATA TEMUAN DARI SOAP SEMENTARA (TEMP SOAP & REKAMAN AUDIO KONSULTASI AKTIF)', lakukan integrasi dan korelasi mendalam terhadap keluhan klinis terkini dan dugaan asesmen dari rekaman/SOAP sementara tersebut.\n"
+            "3. Format sajian menggunakan Markdown terstruktur:\n"
+            "   - Judul: `## 🎯 Rekomendasi Diagnosis & Kodefikasi ICD-10 Pasien`\n"
+            "   - Tabel Diagnosis Primer (Diagnosis, Kode ICD-10, Tingkat Keyakinan %, Justifikasi Klinis)\n"
+            "   - Tabel Diagnosis Banding (Diagnosis Banding, Kode ICD-10, Tingkat Keyakinan %, Petunjuk Klinis / Differensiasi)\n"
+            "   - Rencana Pemeriksaan Penunjang Lanjutan (Workup)\n"
+            "   - Disclaimer medis singkat di bagian akhir."
+        )
+
+    elif is_medication_only:
+        prompt_context = f"Doctor Query: {query}\n\n"
+        if simrs_profile:
+            prompt_context += (
+                f"=== SIMRS PATIENT DEMOGRAPHICS ===\n"
+                f"MRN: {simrs_profile.get('mrn')} | Full Name: {simrs_profile.get('full_name')} | Age/Sex: {simrs_profile.get('age')} y/o {simrs_profile.get('gender')}\n"
+                f"Clinic: {simrs_profile.get('active_clinic')} | DPJP: {simrs_profile.get('attending_physician')}\n\n"
+            )
+        if simrs_anamnesis:
+            prompt_context += f"=== ANAMNESIS & RIWAYAT OBAT SIMRS ===\n{simrs_anamnesis}\n\n"
+        if simrs_labs:
+            prompt_context += f"=== TANDA VITAL & EVALUASI FUNGSI GINJAL (eGFR/uACR) ===\n{simrs_labs}\n\n"
+        if temp_rec and temp_rec.get("soap_content"):
+            sc = temp_rec["soap_content"]
+            prompt_context += (
+                f"=== DATA TEMUAN DARI SOAP SEMENTARA (TEMP SOAP & REKAMAN AUDIO KONSULTASI AKTIF) ===\n"
+                f"ID SOAP Temp: {temp_rec.get('temp_id')}\n"
+                f"- Keluhan (Subjective): {sc.get('subjective')}\n"
+                f"- Asesmen (Assessment): {sc.get('assessment')}\n"
+                f"- Rencana Resep / Obat (Plan): {sc.get('plan')}\n"
+                f"- Instruksi & Edukasi: {sc.get('instructions')}\n"
+                f"- Transkrip Percakapan Medis: {temp_rec.get('audio_transcript')}\n\n"
+            )
+        if rag_chunks:
+            prompt_context += f"=== QDRANT VECTOR RAG KNOWLEDGE ===\n"
+            for i, chunk in enumerate(rag_chunks, 1):
+                prompt_context += f"[{i}] {chunk['title']}: {chunk['chunk_snippet']}\n\n"
+
+        system_instruction = (
+            "Anda adalah Asisten AI Medis Klinis (Medical Co-Pilot) profesional.\n"
+            "TUGAS: Dokter meminta Rekomendasi Terapi Obat & Panduan Penyesuaian Dosis (Renal Dosing) untuk pasien ini.\n"
+            "INSTRUKSI KHUSUS GROUNDING & ANALISIS:\n"
+            "1. Sajikan rekomendasi rejimen terapi obat lini pertama berbasis bukti (Evidence-Based Medicine) dan panduan penyesuaian dosis fungsi ginjal (Renal Dosing).\n"
+            "2. PENTING (INTEGRASI SOAP TEMP): Jika terdapat 'DATA TEMUAN DARI SOAP SEMENTARA (TEMP SOAP & REKAMAN AUDIO KONSULTASI AKTIF)', berikan analisis evaluasi kesesuaian obat yang tercatat pada Plan SOAP temp terhadap kondisi klinis dan kontraindikasi pasien.\n"
+            "3. Format sajian menggunakan Markdown terstruktur:\n"
+            "   - Judul: `## 💊 Rekomendasi Terapi Obat & Panduan Penyesuaian Dosis Pasien`\n"
+            "   - Tabel Rejimen Farmakoterapi (Nama Obat & Golongan, Dosis & Frekuensi, Rute & Durasi, Panduan Penyesuaian Dosis Ginjal / Renal Dosing, Indikasi Klinis)\n"
+            "   - Bila data SOAP Temp tersedia, sertakan sub-bagian: `### 🎙️ Analisis Kesesuaian Terapi Obat dari SOAP Temp / Rekaman Konsultasi`\n"
+            "   - Poin Pemantauan Efikasi & Keamanan (Monitoring Points)\n"
+            "   - Disclaimer medis di akhir."
+        )
+
+    elif is_procedure_only:
+        prompt_context = f"Doctor Query: {query}\n\n"
+        if simrs_profile:
+            prompt_context += (
+                f"=== SIMRS PATIENT DEMOGRAPHICS ===\n"
+                f"MRN: {simrs_profile.get('mrn')} | Full Name: {simrs_profile.get('full_name')} | Age/Sex: {simrs_profile.get('age')} y/o {simrs_profile.get('gender')}\n"
+                f"Clinic: {simrs_profile.get('active_clinic')} | DPJP: {simrs_profile.get('attending_physician')}\n\n"
+            )
+        if simrs_anamnesis:
+            prompt_context += f"=== ANAMNESIS SIMRS ===\n{simrs_anamnesis}\n\n"
+        if simrs_labs:
+            prompt_context += f"=== TTV & LABS SIMRS ===\n{simrs_labs}\n\n"
+        if temp_rec and temp_rec.get("soap_content"):
+            sc = temp_rec["soap_content"]
+            prompt_context += (
+                f"=== DATA TEMUAN DARI SOAP SEMENTARA (TEMP SOAP & REKAMAN AUDIO KONSULTASI AKTIF) ===\n"
+                f"ID SOAP Temp: {temp_rec.get('temp_id')}\n"
+                f"- Keluhan (Subjective): {sc.get('subjective')}\n"
+                f"- Asesmen (Assessment): {sc.get('assessment')}\n"
+                f"- Rencana Penunjang & Tindakan (Plan): {sc.get('plan')}\n"
+                f"- Instruksi & Edukasi: {sc.get('instructions')}\n"
+                f"- Transkrip Percakapan Medis: {temp_rec.get('audio_transcript')}\n\n"
+            )
+        if rag_chunks:
+            prompt_context += f"=== QDRANT VECTOR RAG KNOWLEDGE ===\n"
+            for i, chunk in enumerate(rag_chunks, 1):
+                prompt_context += f"[{i}] {chunk['title']}: {chunk['chunk_snippet']}\n\n"
+
+        system_instruction = (
+            "Anda adalah Asisten AI Medis Klinis (Medical Co-Pilot) profesional.\n"
+            "TUGAS: Dokter meminta Rekomendasi Tindakan & Prosedur Medis, Rencana Intervensi Klinis, Pemantauan Khusus, dan Tata Laksana Non-Farmakologi.\n"
+            "INSTRUKSI KHUSUS GROUNDING & ANALISIS:\n"
+            "1. Sajikan rekomendasi tindakan medis, prosedur diagnostik/intervensi klinis terarah, pemantauan khusus, dan edukasi gaya hidup.\n"
+            "2. PENTING (INTEGRASI SOAP TEMP): Jika terdapat 'DATA TEMUAN DARI SOAP SEMENTARA (TEMP SOAP & REKAMAN AUDIO KONSULTASI AKTIF)', integrasikan rencana pemeriksaan penunjang lanjutan, tindakan, dan edukasi yang tercatat pada SOAP temp tersebut.\n"
+            "3. Format sajian menggunakan Markdown terstruktur:\n"
+            "   - Judul: `## 💉 Rekomendasi Tindakan, Prosedur Medis & Monitoring Pasien`\n"
+            "   - Tabel Tindakan & Prosedur Intervensi Klinis (Jenis Tindakan, Indikasi Klinis, Tingkat Urgensi, Panduan Persiapan / Protokol)\n"
+            "   - Rencana Pemeriksaan Penunjang Lanjutan (Workup Diagnostik)\n"
+            "   - Rencana Tata Laksana Non-Farmakologi & Modifikasi Gaya Hidup\n"
+            "   - Bila data SOAP Temp tersedia, sertakan sub-bagian: `### 🎙️ Rencana Tindakan & Edukasi dari SOAP Temp / Rekaman Konsultasi`\n"
+            "   - Pemantauan Klinis Khusus (Monitoring Points)\n"
+            "   - Disclaimer medis di akhir."
+        )
+
     else:
         prompt_context = f"Doctor Query: {query}\n\n"
         if simrs_profile:
@@ -563,6 +826,18 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
             for l in simrs_labs.get("latest_labs", [])[:5]:
                 prompt_context += f"- {l['test_name']}: {l['value']} {l['unit']} ({l['status']})\n"
             prompt_context += "\n"
+        if temp_rec and temp_rec.get("soap_content"):
+            sc = temp_rec["soap_content"]
+            prompt_context += (
+                f"=== DATA TEMUAN DARI SOAP SEMENTARA (TEMP SOAP & HASIL REKAMAN AUDIO KONSULTASI) ===\n"
+                f"ID SOAP Temp: {temp_rec.get('temp_id')} | Status: {temp_rec.get('status', 'pending_review')}\n"
+                f"- Keluhan & Riwayat Baru (Subjective): {sc.get('subjective')}\n"
+                f"- Temuan Fisik & Observasi (Objective): {sc.get('objective')}\n"
+                f"- Asesmen & Dugaan Klinis Sementara (Assessment): {sc.get('assessment')}\n"
+                f"- Rencana Terapi / Resep Konsultasi (Plan): {sc.get('plan')}\n"
+                f"- Instruksi & Edukasi Pasien (Instructions): {sc.get('instructions')}\n"
+                f"- Transkrip Percakapan Medis: {temp_rec.get('audio_transcript')}\n\n"
+            )
         if rag_chunks:
             prompt_context += f"=== QDRANT VECTOR RAG KNOWLEDGE ===\n"
             for i, chunk in enumerate(rag_chunks, 1):

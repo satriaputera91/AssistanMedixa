@@ -8,9 +8,10 @@ from app.modules.medical_agent.tools.simrs_tools import (
 )
 from app.modules.medical_agent.tools.clinical_tools import tool_query_patient_ehr
 from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
+from app.core.database import dbApplication
 
 def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
-    """Retrieves patient demographics, chronic history, and admissions from SIMRS."""
+    """Retrieves patient demographics, chronic history, and admissions from SIMRS, as well as temp SOAP if present."""
     log_node_start("fetch_patient_history", state, icon="👤")
     patient_id = state.get("patient_id")
     steps = list(state.get("steps_executed", []))
@@ -18,6 +19,7 @@ def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
     ehr_result = None
     simrs_profile = None
     simrs_history = None
+    temp_soap_data = None
 
     simrs_mrn = f"MRN-SIMRS-{patient_id.replace('P-', '')}" if (patient_id and patient_id.strip()) else None
 
@@ -73,7 +75,28 @@ def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
                         "lab_terbaru": ehr_result.get("recent_labs", {})
                     }
                 })
-        log_node_end("fetch_patient_history", f"SIMRS Profile: {bool(simrs_profile)} | History: {bool(simrs_history)} | EHR: {bool(ehr_result)}")
+
+        # Step 2D: Check Temp SOAP records in Application Database (e.g. from Audio Recording / Consultation Draft)
+        if patient_id:
+            temp_list = dbApplication.list_temp_soap(patient_id=patient_id, limit=1)
+            if temp_list:
+                temp_soap_data = temp_list[0]
+                sc = temp_soap_data.get("soap_content") or {}
+                steps.append({
+                    "step_name": "Sinkronisasi SOAP Temp & Rekaman Konsultasi",
+                    "description": f"Ditemukan data SOAP sementara aktif ({temp_soap_data.get('temp_id')}) untuk integrasi analisis klinis komprehensif",
+                    "status": "success",
+                    "result": {
+                        "temp_id": temp_soap_data.get("temp_id"),
+                        "status": temp_soap_data.get("status"),
+                        "audio_filename": temp_soap_data.get("audio_filename"),
+                        "keluhan_terkini": sc.get("subjective", "-")[:80],
+                        "asesmen_sementara": sc.get("assessment", "-")[:80],
+                        "rencana_terapi": sc.get("plan", "-")[:80]
+                    }
+                })
+
+        log_node_end("fetch_patient_history", f"SIMRS Profile: {bool(simrs_profile)} | History: {bool(simrs_history)} | Temp SOAP: {bool(temp_soap_data)}")
     else:
         steps.append({
             "step_name": "Konsultasi Medis Umum (Tanpa Data Pasien)",
@@ -88,7 +111,8 @@ def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
         "steps_executed": steps,
         "ehr_data": ehr_result,
         "simrs_profile": simrs_profile,
-        "simrs_history": simrs_history
+        "simrs_history": simrs_history,
+        "temp_soap_data": temp_soap_data
     }
 
 def node_fetch_patient_anamnesis(state: MedicalAgentState) -> MedicalAgentState:
@@ -105,8 +129,8 @@ def node_fetch_patient_anamnesis(state: MedicalAgentState) -> MedicalAgentState:
         if anamnesis_res.get("status") == "success":
             simrs_anamnesis = anamnesis_res["anamnesis"]
             steps.append({
-                "step_name": "2. Ambil Data Anamnesis SIMRS (MCP)",
-                "description": f"Mengambil data anamnesis klinis lengkap dari modul RME SIMRS untuk {simrs_mrn}",
+                "step_name": "2. Ambil Anamnesis Sebelumnya (MCP)",
+                "description": f"MengAmbil Anamnesis Sebelumnya klinis lengkap dari modul RME SIMRS untuk {simrs_mrn}",
                 "status": "success",
                 "result": {
                     "keluhan_utama": simrs_anamnesis.get("chief_complaint"),
@@ -119,7 +143,7 @@ def node_fetch_patient_anamnesis(state: MedicalAgentState) -> MedicalAgentState:
             log_node_end("fetch_patient_anamnesis", f"Chief Complaint: '{simrs_anamnesis.get('chief_complaint')}'")
         else:
             steps.append({
-                "step_name": "2. Ambil Data Anamnesis SIMRS (MCP)",
+                "step_name": "2. Ambil Anamnesis Sebelumnya (MCP)",
                 "description": f"Data anamnesis untuk {simrs_mrn} belum tercatat di SIMRS.",
                 "status": "info",
                 "result": f"Data anamnesis untuk {simrs_mrn} tidak ditemukan di SIMRS."
@@ -127,7 +151,7 @@ def node_fetch_patient_anamnesis(state: MedicalAgentState) -> MedicalAgentState:
             log_node_end("fetch_patient_anamnesis", "Anamnesis data not found in SIMRS")
     else:
         steps.append({
-            "step_name": "Ambil Data Anamnesis SIMRS (Konsultasi Umum)",
+            "step_name": "Ambil Anamnesis Sebelumnya (Konsultasi Umum)",
             "description": "Tidak ada data pasien yang dipilih.",
             "status": "info",
             "result": "Melewati pengambilan anamnesis pasien."

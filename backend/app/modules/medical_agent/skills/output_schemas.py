@@ -183,7 +183,7 @@ class ClinicalSOAPOutputSchema(BaseModel):
     Structured Clinical S-O-A-P / CPPT Output Schema.
     """
     output_type: str = Field(default="clinical_soap", description="Identifier output schema")
-    title: str = Field(default="📋 Catatan Perkembangan Pasien Terintegrasi (CPPT / S-O-A-P)")
+    title: str = Field(default="📋 Hasil Rekomendasi Resume (CPPT / S-O-A-P)")
     patient: Optional[PatientDemographicsData] = None
     subjective: SubjectiveData
     objective: ObjectiveData
@@ -243,7 +243,10 @@ class ClinicalSOAPOutputSchema(BaseModel):
         md += "\n"
 
         # Objective Section
-        md += "### 🔬 O — Objective (Pemeriksaan Fisik & Penunjang)\n"
+        md += "### 🔬 O — Objective (Pemeriksaan Fisik & Penunjang)\n"        
+        if self.objective.physical_examination:
+            md += f"- **Pemeriksaan Fisik**: {self.objective.physical_examination}\n"
+
         if self.objective.vital_signs:
             vs = self.objective.vital_signs
             v_parts = []
@@ -255,9 +258,7 @@ class ClinicalSOAPOutputSchema(BaseModel):
             if v_parts:
                 md += f"- **Tanda Vital (TTV)**: {', '.join(v_parts)}\n"
 
-        if self.objective.physical_examination:
-            md += f"- **Pemeriksaan Fisik**: {self.objective.physical_examination}\n"
-
+       
         if self.objective.laboratory_results:
             md += "\n**Hasil Laboratorium & Pemeriksaan:**\n"
             md += "| Parameter | Hasil | Satuan | Status | Nilai Rujukan |\n| :--- | :--- | :--- | :--- | :--- |\n"
@@ -372,7 +373,7 @@ class SIMRSTransactionReportSchema(BaseModel):
     Structured Report for CPPT sync / commit to SIMRS via Model Context Protocol.
     """
     output_type: str = Field(default="simrs_transaction", description="Identifier output schema")
-    title: str = Field(default="📤 Pengiriman Catatan Perkembangan Pasien Terintegrasi (CPPT / S-O-A-P) ke SIMRS RME")
+    title: str = Field(default="📤 Hasil Rekomendasi Resume (CPPT / S-O-A-P) ke SIMRS RME")
     status_message: str = Field(default="✅ Berhasil Terkirim & Tersimpan di Modul RME SIMRS")
     log_id: str = Field(description="ID Log Transaksi SIMRS")
     timestamp: str = Field(description="Waktu Transaksi")

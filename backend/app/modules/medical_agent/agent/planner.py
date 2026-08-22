@@ -65,7 +65,7 @@ def node_planner(state: MedicalAgentState) -> MedicalAgentState:
     elif any(k in query_lower for k in ["ambil informasi demografi", "ambil informasi riwayat", "ambil data profil", "profil demografi", "demografi pasien", "demografi", "profil pasien", "identitas pasien", "data demografi"]):
         detected_intent = "1. Ambil Informasi Demografi Pasien (SIMRS MCP)"
     elif any(k in query_lower for k in ["anamnesis", "keluhan", "rps", "rpd", "rpk", "tinjauan sistem"]):
-        detected_intent = "2. Ambil Data Anamnesis SIMRS (MCP)"
+        detected_intent = "2. Ambil Anamnesis Sebelumnya"
     elif any(k in query_lower for k in ["lab", "laboratorium", "ttv", "tanda vital", "egfr", "uacr", "hba1c", "elektrolit", "tensi"]):
         detected_intent = "3. Evaluasi Hasil Lab & Pemeriksaan SIMRS (MCP)"
     elif any(k in query_lower for k in ["diagnosis", "icd", "banding", "differential"]):

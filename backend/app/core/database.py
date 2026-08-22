@@ -37,7 +37,7 @@ class InMemoryDatabase:
 
         # Structured S/O/A notes generated from audio. Revisions are only accepted
         # after the doctor explicitly confirms the proposed changes.
-        self.soa_notes: Dict[str, dict] = {}
+        self.soap_notes: Dict[str, dict] = {}
 
         # Audit & LLM Usage Logs
         self.audit_logs: List[dict] = [
@@ -178,4 +178,127 @@ class InMemoryDatabase:
         # Tracks which doctor selected which room (user_id -> room_id)
         self.doctor_selected_room: Dict[str, str] = {}
 
-db = InMemoryDatabase()
+        # Temporary SOAP Records from audio & consultation sessions before sync to SIMRS
+        self.temp_soap_records: Dict[str, dict] = {}
+
+    def create_temp_soap(
+        self,
+        session_id: str,
+        patient_id: Optional[str],
+        user_id: str,
+        doctor_name: str,
+        audio_filename: str,
+        audio_url: str,
+        audio_path: str,
+        audio_size_bytes: int,
+        audio_transcript: str,
+        soap_content: dict,
+        raw_markdown: str,
+        structured_output: Optional[dict] = None,
+        patient_name: Optional[str] = None,
+        mrn: Optional[str] = None,
+        nik: Optional[str] = None,
+    ) -> dict:
+        from uuid import uuid4
+        now = datetime.now().isoformat()
+        temp_id = f"temp-soap-{uuid4().hex[:12]}"
+        record = {
+            "temp_id": temp_id,
+            "session_id": session_id,
+            "patient_id": patient_id,
+            "patient_name": patient_name,
+            "mrn": mrn,
+            "nik": nik,
+            "user_id": user_id,
+            "doctor_name": doctor_name,
+            "audio_filename": audio_filename,
+            "audio_url": audio_url,
+            "audio_path": audio_path,
+            "audio_size_bytes": audio_size_bytes,
+            "audio_transcript": audio_transcript,
+            "soap_content": soap_content,
+            "raw_markdown": raw_markdown,
+            "structured_output": structured_output or {},
+            "status": "draft",  # draft, pending_review, ready_for_simrs, synced_to_simrs
+            "simrs_sync_status": "pending",  # pending, synced, failed
+            "simrs_log_id": None,
+            "simrs_response": None,
+            "created_at": now,
+            "updated_at": now,
+            "synced_at": None,
+        }
+        self.temp_soap_records[temp_id] = record
+
+        # Link relation to chat session if exists
+        if session_id in self.chat_sessions:
+            self.chat_sessions[session_id]["temp_soap_id"] = temp_id
+
+        return record
+
+    def get_temp_soap(self, temp_id: str) -> Optional[dict]:
+        return self.temp_soap_records.get(temp_id)
+
+    def get_temp_soap_by_session(self, session_id: str) -> Optional[dict]:
+        for rec in self.temp_soap_records.values():
+            if rec.get("session_id") == session_id:
+                return rec
+        return None
+
+    def list_temp_soap(
+        self,
+        user_id: Optional[str] = None,
+        patient_id: Optional[str] = None,
+        status: Optional[str] = None,
+        session_id: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[dict]:
+        results = []
+        for rec in reversed(list(self.temp_soap_records.values())):
+            if user_id and rec.get("user_id") != user_id:
+                continue
+            if patient_id and rec.get("patient_id") != patient_id:
+                continue
+            if status and rec.get("status") != status:
+                continue
+            if session_id and rec.get("session_id") != session_id:
+                continue
+            results.append(rec)
+            if limit is not None and len(results) >= limit:
+                break
+        return results
+
+    def update_temp_soap(self, temp_id: str, updates: dict) -> Optional[dict]:
+        rec = self.temp_soap_records.get(temp_id)
+        if not rec:
+            return None
+        for k, v in updates.items():
+            if k not in ("temp_id", "created_at"):
+                rec[k] = v
+        rec["updated_at"] = datetime.now().isoformat()
+        return rec
+
+    def delete_temp_soap(self, temp_id: str) -> bool:
+        if temp_id in self.temp_soap_records:
+            rec = self.temp_soap_records.pop(temp_id)
+            sess_id = rec.get("session_id")
+            if sess_id and sess_id in self.chat_sessions:
+                if self.chat_sessions[sess_id].get("temp_soap_id") == temp_id:
+                    self.chat_sessions[sess_id]["temp_soap_id"] = None
+            return True
+        return False
+
+    def mark_temp_soap_synced(self, temp_id: str, simrs_res: dict) -> Optional[dict]:
+        rec = self.temp_soap_records.get(temp_id)
+        if not rec:
+            return None
+        now = datetime.now().isoformat()
+        rec["status"] = "synced_to_simrs"
+        rec["simrs_sync_status"] = "synced"
+        rec["simrs_log_id"] = simrs_res.get("log_id")
+        rec["simrs_response"] = simrs_res
+        rec["synced_at"] = now
+        rec["updated_at"] = now
+        return rec
+
+dbApplication = InMemoryDatabase()
+db = dbApplication

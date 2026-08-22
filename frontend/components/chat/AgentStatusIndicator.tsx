@@ -35,7 +35,7 @@ const PHASES: StatusPhase[] = [
     key: 'searching',
     badge: 'Searching',
     icon: '🔍',
-    label: 'Mencari Pengetahuan RAG',
+    label: 'Mencari Pengetahuan',
     detail: 'Mencocokkan embedding Gemini & pemeringkatan ulang Qdrant...',
     color: 'bg-blue-100 text-blue-800 border-blue-300',
     darkColor: 'dark:bg-blue-950/70 dark:text-blue-300 dark:border-blue-700',
