@@ -37,7 +37,7 @@ const PATIENT_FAQS = [
   { icon: '📖', label: '7. Penjelasan Patofisiologi Penyakit Pasien', text: 'Tampilkan penjelasan patofisiologi penyakit, kriteria diagnostik baku, dan tahapan klinis (staging) pada pasien ini.' },
   { icon: '🚨', label: '8. Deteksi Tanda Bahaya & Red Flags Pasien', text: 'Lakukan deteksi tanda bahaya klinis (clinical red flags), ambang kedaruratan, dan risiko komplikasi pada pasien ini.' },
   { icon: '🛡️', label: '9. Skrining Interaksi & Keamanan Obat Pasien', text: 'Lakukan skrining interaksi obat-ke-obat (DDI), kontraindikasi riwayat alergi silang, dan keamanan farmakologi pasien ini.' },
-  { icon: '📤', label: '10. Buat Draft RME', text: 'Buat resume catatan perkembangan pasien terintegrasi (CPPT / S-O-A-P) komprehensif dan kirim/sinkronisasikan ke modul RME SIMRS.' },
+  { icon: '📤', label: '10. Buat Draft CPPT S/O/A/P', text: 'Buat resume catatan perkembangan pasien terintegrasi (CPPT / S-O-A-P) komprehensif dan kirim/sinkronisasikan ke modul RME SIMRS.' },
 ];
 
 // FAQ for General Medical Consultation (Knowledge Management, Guidelines, Drug Dosing, Literature)
@@ -459,7 +459,7 @@ export default function ChatWindow({
                             <button
                               type="button"
                               onClick={() => {
-                                const parsed = parseSOAPFromAIText(displayContent, messages);
+                                const parsed = parseSOAPFromAIText(displayContent, messages, currentPatient);
                                 openCpptModal(parsed, i);
                               }}
                               className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-xs"
@@ -518,12 +518,13 @@ export default function ChatWindow({
                       key={idx}
                       type="button"
                       onClick={() => {
-                        if ((p.label.includes('Buat Draft RME') || p.label.includes('Draft RME') || p.label.includes('Buat & Kirim CPPT')) && selectedPatient) {
+                        const isCpptFaq = /CPPT|SOAP|Draft|Draft CPPT/i.test(p.label);
+                        if (isCpptFaq && selectedPatient) {
                           let targetIdx: number | null = null;
-                          for (let idx = messages.length - 1; idx >= 0; idx--) {
-                            const c = messages[idx].content;
-                            if (c.includes('Resume Klinis (S-O-A-P)') || c.includes('Transkrip Percakapan Medis') || c.includes('Resume CPPT') || (c.includes('Subjective') && c.includes('Objective'))) {
-                              targetIdx = idx;
+                          for (let i = messages.length - 1; i >= 0; i--) {
+                            const c = messages[i].content;
+                            if (c.includes('Resume Klinis (S-O-A-P)') || c.includes('Transkrip Percakapan Medis') || c.includes('Resume CPPT') || c.includes('Catatan Perkembangan Pasien Terintegrasi') || (c.includes('Subjective') && c.includes('Objective'))) {
+                              targetIdx = i;
                               break;
                             }
                           }
@@ -554,12 +555,13 @@ export default function ChatWindow({
                       key={idx + 5}
                       type="button"
                       onClick={() => {
-                        if ((p.label.includes('Buat Draft RME') || p.label.includes('Draft RME') || p.label.includes('Buat & Kirim CPPT')) && selectedPatient) {
+                        const isCpptFaq = /CPPT|SOAP|Draft|Draft CPPT/i.test(p.label);
+                        if (isCpptFaq && selectedPatient) {
                           let targetIdx: number | null = null;
-                          for (let idx = messages.length - 1; idx >= 0; idx--) {
-                            const c = messages[idx].content;
-                            if (c.includes('Resume Klinis (S-O-A-P)') || c.includes('Transkrip Percakapan Medis') || c.includes('Resume CPPT') || (c.includes('Subjective') && c.includes('Objective'))) {
-                              targetIdx = idx;
+                          for (let i = messages.length - 1; i >= 0; i--) {
+                            const c = messages[i].content;
+                            if (c.includes('Resume Klinis (S-O-A-P)') || c.includes('Transkrip Percakapan Medis') || c.includes('Resume CPPT') || c.includes('Catatan Perkembangan Pasien Terintegrasi') || (c.includes('Subjective') && c.includes('Objective'))) {
+                              targetIdx = i;
                               break;
                             }
                           }

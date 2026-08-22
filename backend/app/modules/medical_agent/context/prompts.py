@@ -15,7 +15,7 @@ GREETING_INSTRUCTION = (
     "7. **📖 Penjelasan Penyakit & Patofisiologi**\n"
     "8. **🚨 Deteksi Tanda Bahaya & Red Flags**\n"
     "9. **🛡️ Skrining Interaksi & Keamanan Obat Pasien**\n"
-    "10. **📤 Buat Draft RME**\n"
+    "10. **📤 Buat Draft CPPT S/O/A/P**\n"
     "11. **🎙️ Rekaman Konsultasi Klinis (Audio STT)**\n\n"
     "PENTING: JANGAN menampilkan data rekam medis pasien atau tabel dummy jika dokter tidak memintanya."
 )

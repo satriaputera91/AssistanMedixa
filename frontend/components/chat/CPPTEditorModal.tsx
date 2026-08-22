@@ -808,7 +808,7 @@ export default function CPPTEditorModal({
   onConfirmSend,
   isSubmitting = false,
 }: CPPTEditorModalProps) {
-  const [activeTab, setActiveTab] = useState<'all' | 'anamnesis' | 'diagnosis' | 'medication' | 'cppt' | 'S' | 'O' | 'A' | 'P' | 'I'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'S' | 'O' | 'A' | 'P' | 'I'>('all');
 
   // Default CPPT values derived strictly from AI generated recommendations
   const [subjective, setSubjective] = useState('');
@@ -1192,19 +1192,19 @@ export default function CPPTEditorModal({
         <div className="px-6 py-4 border-b border-emerald-100 dark:border-slate-800 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50/50 dark:from-slate-900 dark:via-slate-850 dark:to-slate-900 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center text-lg font-bold shadow-md shadow-emerald-600/20">
-              📋
+              📝
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-bold text-emerald-950 dark:text-slate-100">
-                  Draft Rekam Medis Elektronik (RME) Pasien
+                  Review & Konfirmasi CPPT (S/O/A/P + Instruksi) Pasien
                 </h3>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
-                  ✏️ Editor & Validasi DPJP
+                  ✏️ Mode Edit & Validasi DPJP
                 </span>
               </div>
               <p className="text-xs text-emerald-700 dark:text-slate-400">
-                Verifikasi dan sesuaikan Anamnesis, Diagnosis ICD-10, Farmakoterapi, serta Catatan CPPT (S-O-A-P) sebelum dikirim ke SIMRS
+                Verifikasi dan sesuaikan isi catatan perkembangan terintegrasi sebelum ditransmisikan permanen ke RME SIMRS
               </p>
             </div>
           </div>
@@ -1212,7 +1212,7 @@ export default function CPPTEditorModal({
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
           >
             ✕
           </button>
@@ -1242,26 +1242,19 @@ export default function CPPTEditorModal({
         </div>
 
         {/* Tabs Filter */}
-        <div className="px-6 pt-3 pb-1.5 border-b border-emerald-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center gap-1.5 overflow-x-auto">
-          <span className="text-xs font-bold text-slate-500 dark:text-slate-400 mr-1.5 shrink-0">Menu Tab:</span>
-          {[
-            { id: 'anamnesis', label: '📝 Anamnesis Pasien' },
-            { id: 'diagnosis', label: '🎯 Rekomendasi Diagnosis (ICD-10)' },
-            { id: 'medication', label: '💊 Terapi & Resep Obat' },
-            { id: 'cppt', label: '📋 Catatan CPPT (S-O-A-P)' },
-            { id: 'all', label: '📄 Tinjauan Semua Seksi (All)' },
-          ].map((tab) => (
+        <div className="px-6 pt-3 pb-1 border-b border-emerald-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center gap-2">
+          <span className="text-xs font-bold text-slate-500 dark:text-slate-400 mr-2">Tampilan:</span>
+          {(['all', 'S', 'O', 'A', 'P', 'I'] as const).map((tab) => (
             <button
-              key={tab.id}
+              key={tab}
               type="button"
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 cursor-pointer ${
-                activeTab === tab.id
-                  ? 'bg-emerald-600 text-white shadow-xs scale-[1.02]'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-              }`}
+              onClick={() => setActiveTab(tab)}
+              className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${activeTab === tab
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                }`}
             >
-              <span>{tab.label}</span>
+              {tab === 'all' ? '📄 Semua (S-O-A-P-I)' : tab === 'I' ? 'Komponen I (Instruksi)' : `Komponen ${tab}`}
             </button>
           ))}
         </div>
@@ -1269,7 +1262,7 @@ export default function CPPTEditorModal({
         {/* Modal Body / Editable Form */}
         <div className="p-6 overflow-y-auto space-y-4 flex-1">
           {/* S - Subjective */}
-          {(activeTab === 'all' || activeTab === 'anamnesis' || activeTab === 'cppt' || activeTab === 'S') && (
+          {(activeTab === 'all' || activeTab === 'S') && (
             <div className="rounded-2xl border border-emerald-200 dark:border-slate-700 bg-emerald-50/40 dark:bg-slate-850/60 p-4 transition-colors space-y-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <label className="text-xs font-bold text-emerald-900 dark:text-emerald-300 flex items-center gap-2">
@@ -1401,7 +1394,7 @@ export default function CPPTEditorModal({
           )}
 
           {/* O - Objective */}
-          {(activeTab === 'all' || activeTab === 'cppt' || activeTab === 'O') && (
+          {(activeTab === 'all' || activeTab === 'O') && (
             <div className="rounded-2xl border border-teal-200 dark:border-slate-700 bg-teal-50/40 dark:bg-slate-850/60 p-4 transition-colors space-y-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <label className="text-xs font-bold text-teal-900 dark:text-teal-300 flex items-center gap-2">
@@ -1425,8 +1418,8 @@ export default function CPPTEditorModal({
                 <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-teal-300 dark:border-slate-700 shadow-sm space-y-3 animate-in fade-in zoom-in-95 duration-150">
                   <div className="flex items-center justify-between border-b border-teal-100 dark:border-slate-800 pb-2">
                     <span className="text-xs font-bold text-teal-950 dark:text-teal-300 flex items-center gap-1.5">
-                      <span>🔬</span>
-                      <span>Katalog Data Observasi & Lab Pasien (Klik untuk Menyisipkan ke Objective)</span>
+                      <span>🩺</span>
+                      <span>Katalog Data Observasi Klinis & Lab (Klik untuk Menyisipkan ke Catatan)</span>
                     </span>
                     <div className="flex items-center gap-1 overflow-x-auto max-w-[65%] py-0.5">
                       <button
@@ -1475,7 +1468,7 @@ export default function CPPTEditorModal({
                                 type="button"
                                 onClick={() => appendObjectiveObservation(item.text)}
                                 className={`px-2.5 py-1 rounded-xl text-[11px] font-medium border text-left flex items-center gap-1.5 transition-all ${isAlreadyIncluded
-                                  ? 'bg-teal-100 dark:bg-teal-950/60 border-teal-400 dark:border-teal-700 text-teal-900 dark:text-teal-200 font-semibold'
+                                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300 font-semibold'
                                   : cat.category.includes('Pasien Ini')
                                     ? 'bg-amber-50/80 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900 border-amber-300 dark:border-amber-700 text-amber-950 dark:text-amber-200 hover:scale-[1.01]'
                                     : 'bg-teal-50/70 dark:bg-slate-800/80 hover:bg-teal-100 dark:hover:bg-slate-700 border-teal-200 dark:border-slate-700 text-teal-950 dark:text-slate-200 hover:scale-[1.01]'
@@ -1533,7 +1526,7 @@ export default function CPPTEditorModal({
           )}
 
           {/* A - Assessment */}
-          {(activeTab === 'all' || activeTab === 'diagnosis' || activeTab === 'cppt' || activeTab === 'A') && (
+          {(activeTab === 'all' || activeTab === 'A') && (
             <div className="rounded-2xl border border-blue-200 dark:border-slate-700 bg-blue-50/40 dark:bg-slate-850/60 p-4 transition-colors space-y-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <label className="text-xs font-bold text-blue-900 dark:text-blue-300 flex items-center gap-2">
@@ -1555,15 +1548,42 @@ export default function CPPTEditorModal({
                 </div>
               </div>
 
-              {/* Interactive Diagnosis AI Panel */}
+              {/* AI Diagnosis Generated Workflow Results Panel */}
               {showAiDiagPanel && (
-                <div className="p-3.5 rounded-2xl bg-blue-50/80 dark:bg-slate-800/80 border border-blue-200 dark:border-slate-700 space-y-3 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="flex items-center justify-between border-b border-blue-100 dark:border-slate-700 pb-2">
-                    <span className="text-xs font-bold text-blue-950 dark:text-blue-300 flex items-center gap-1.5">
-                      <span>🤖</span>
-                      <span>Rekomendasi Diagnosis AI & Analisis ICD-10</span>
-                    </span>
+                <div className="p-3.5 rounded-xl bg-linear-to-r from-blue-500/10 via-indigo-500/10 to-teal-500/10 border border-blue-300 dark:border-blue-700 space-y-2.5">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm">✨</span>
+                      <span className="text-xs font-bold text-blue-950 dark:text-blue-200">
+                        Hasil Rekomendasi Diagnosis AI Co-Pilot
+                      </span>
+                      {isGeneratingDiagnosis && (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-blue-600 dark:text-blue-400 font-semibold animate-pulse">
+                          <span className="w-2.5 h-2.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></span>
+                          Menganalisis EMR SIMRS...
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2">
+                      {aiGeneratedDiagnoses.length > 0 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectAllAIDiag(true)}
+                            className="text-[10px] text-blue-700 dark:text-blue-300 hover:underline font-semibold cursor-pointer"
+                          >
+                            Pilih Semua
+                          </button>
+                          <span className="text-slate-300 dark:text-slate-600">|</span>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectAllAIDiag(false)}
+                            className="text-[10px] text-slate-500 dark:text-slate-400 hover:underline font-medium cursor-pointer"
+                          >
+                            Batal Pilih
+                          </button>
+                        </>
+                      )}
                       <button
                         type="button"
                         onClick={() => setShowAiDiagPanel(false)}
@@ -1590,6 +1610,9 @@ export default function CPPTEditorModal({
                       </button>
                     </div>
                   )}
+
+
+
                 </div>
               )}
 
@@ -1604,7 +1627,7 @@ export default function CPPTEditorModal({
           )}
 
           {/* P - Plan */}
-          {(activeTab === 'all' || activeTab === 'medication' || activeTab === 'cppt' || activeTab === 'P') && (
+          {(activeTab === 'all' || activeTab === 'P') && (
             <div className="rounded-2xl border border-indigo-200 dark:border-slate-700 bg-indigo-50/40 dark:bg-slate-850/60 p-4 transition-colors space-y-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <label className="text-xs font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-2">
@@ -1628,82 +1651,89 @@ export default function CPPTEditorModal({
                 <div className="p-3.5 rounded-2xl border border-indigo-200/90 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 space-y-3 shadow-xs animate-in fade-in-50 duration-150">
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <span className="text-[11px] font-bold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
-                      <span>💊</span>
-                      <span>Katalog Rekomendasi Terapi AI (Klik untuk Menyisipkan ke Plan)</span>
+                      <span>💡</span>
+                      <span>Katalog Rekomendasi Terapi Obat, Workup, & Plan AI:</span>
                     </span>
-                    <div className="flex items-center gap-1 overflow-x-auto max-w-[65%] py-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedPlanCategory('all')}
-                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all shrink-0 ${selectedPlanCategory === 'all'
-                          ? 'bg-indigo-600 text-white shadow-2xs'
-                          : 'bg-indigo-50 dark:bg-slate-800 text-indigo-800 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-slate-700'
-                          }`}
-                      >
-                        Semua
-                      </button>
-                      {planCategories.map((c) => (
-                        <button
-                          key={c.category}
-                          type="button"
-                          onClick={() => setSelectedPlanCategory(c.category)}
-                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all shrink-0 flex items-center gap-1 ${selectedPlanCategory === c.category
-                            ? 'bg-indigo-600 text-white shadow-2xs'
-                            : c.category.includes('Pasien Ini')
-                              ? 'bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700 font-bold'
-                              : 'bg-indigo-50 dark:bg-slate-800 text-indigo-800 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-slate-700'
-                            }`}
-                        >
-                          <span>{c.icon}</span>
-                          <span>{c.category.includes('Pasien Ini') ? 'Terapi Pasien (SIMRS)' : c.category.split(' ')[0]}</span>
-                        </button>
-                      ))}
-                    </div>
+                    <span className="text-[10px] text-indigo-600 dark:text-slate-400">
+                      Klik badge untuk menyisipkan ke Plan
+                    </span>
                   </div>
 
-                  {/* Preset Plan Items Grid */}
-                  <div className="space-y-2.5 max-h-52 overflow-y-auto pr-1">
-                    {planCategories.filter(c => selectedPlanCategory === 'all' || c.category === selectedPlanCategory).map((cat) => (
-                      <div key={cat.category} className="space-y-1.5">
-                        <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                          <span>{cat.icon}</span>
-                          <span>{cat.category}</span>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {cat.items.map((item, idx) => {
-                            const isAlreadyIncluded = plan.includes(item.text.replace(/^- /, ''));
-                            return (
-                              <button
-                                key={idx}
-                                type="button"
-                                onClick={() => appendPlanItem(item.text)}
-                                className={`px-2.5 py-1 rounded-xl text-[11px] font-medium border text-left flex items-center gap-1.5 transition-all ${isAlreadyIncluded
-                                  ? 'bg-indigo-100 dark:bg-indigo-950/60 border-indigo-400 dark:border-indigo-700 text-indigo-900 dark:text-indigo-200 font-semibold'
-                                  : cat.category.includes('Pasien Ini')
-                                    ? 'bg-amber-50/80 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900 border-amber-300 dark:border-amber-700 text-amber-950 dark:text-amber-200 hover:scale-[1.01]'
-                                    : 'bg-indigo-50/70 dark:bg-slate-800/80 hover:bg-indigo-100 dark:hover:bg-slate-700 border-indigo-200 dark:border-slate-700 text-indigo-950 dark:text-slate-200 hover:scale-[1.01]'
-                                  }`}
-                              >
-                                <span>{isAlreadyIncluded ? '✓' : '+'}</span>
-                                <span>{item.label}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
+                  {/* Filter Category Pills */}
+                  <div className="flex flex-wrap gap-1.5 border-b border-indigo-100 dark:border-slate-800 pb-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPlanCategory('all')}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all ${selectedPlanCategory === 'all'
+                        ? 'bg-indigo-600 text-white shadow-2xs'
+                        : 'bg-indigo-50 dark:bg-slate-800 text-indigo-900 dark:text-indigo-300 hover:bg-indigo-100'
+                        }`}
+                    >
+                      Semua Kategori
+                    </button>
+                    {planCategories.map((c) => (
+                      <button
+                        key={c.category}
+                        type="button"
+                        onClick={() => setSelectedPlanCategory(c.category)}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 ${selectedPlanCategory === c.category
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : c.category.includes('Pasien Ini')
+                            ? 'bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700'
+                            : 'bg-indigo-50 dark:bg-slate-800 text-indigo-900 dark:text-indigo-300 hover:bg-indigo-100'
+                          }`}
+                      >
+                        <span>{c.icon}</span>
+                        <span>{c.category}</span>
+                      </button>
                     ))}
                   </div>
 
-                  {/* Custom Plan / Medication Input */}
+                  {/* Plan Items Grid */}
+                  <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
+                    {planCategories
+                      .filter((c) => selectedPlanCategory === 'all' || selectedPlanCategory === c.category)
+                      .map((cat) => (
+                        <div key={cat.category} className="space-y-1">
+                          <div className="text-[10px] font-bold text-indigo-800 dark:text-indigo-300 uppercase tracking-wider flex items-center gap-1">
+                            <span>{cat.icon}</span>
+                            <span>{cat.category}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {cat.items.map((item, idx) => {
+                              const isAlreadyIncluded = plan.includes(item.text.trim());
+                              return (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => appendPlanItem(item.text)}
+                                  className={`px-2.5 py-1 rounded-xl text-[11px] font-medium border text-left flex items-center gap-1.5 transition-all ${isAlreadyIncluded
+                                    ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300 font-semibold'
+                                    : cat.category.includes('Pasien Ini')
+                                      ? 'bg-amber-50/80 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900 border-amber-300 dark:border-amber-700 text-amber-950 dark:text-amber-200 hover:scale-[1.01]'
+                                      : 'bg-indigo-50/70 dark:bg-slate-800/80 hover:bg-indigo-100 dark:hover:bg-slate-700 border-indigo-200 dark:border-slate-700 text-indigo-950 dark:text-slate-200 hover:scale-[1.01]'
+                                    }`}
+                                >
+                                  <span>{isAlreadyIncluded ? '✓' : '+'}</span>
+                                  <span>{item.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+
+                  {/* Custom Plan Adder */}
                   <div className="pt-2 border-t border-indigo-100 dark:border-slate-800 flex items-center gap-2 flex-wrap">
                     <span className="text-[10px] font-bold text-indigo-800 dark:text-indigo-400 shrink-0">
-                      Rencana Kustom:
+                      Plan Kustom:
                     </span>
                     <input
                       type="text"
                       value={customPlanLabel}
                       onChange={(e) => setCustomPlanLabel(e.target.value)}
-                      placeholder="Jenis (cth: Terapi / Edukasi / Kontrol)"
+                      placeholder="Kategori / Judul (cth: Profil Besi / EGD Ulang)"
                       className="px-2.5 py-1 text-xs rounded-lg border border-indigo-200 dark:border-slate-700 bg-indigo-50/40 dark:bg-slate-800 text-slate-900 dark:text-slate-100 flex-1 min-w-[140px] focus:outline-none focus:border-indigo-500"
                     />
                     <input
@@ -1736,7 +1766,7 @@ export default function CPPTEditorModal({
           )}
 
           {/* I - Instruksi PPA / Dokter */}
-          {(activeTab === 'all' || activeTab === 'cppt' || activeTab === 'I') && (
+          {(activeTab === 'all' || activeTab === 'I') && (
             <div className="rounded-2xl border border-purple-200 dark:border-slate-700 bg-purple-50/40 dark:bg-slate-850/60 p-4 transition-colors space-y-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <label className="text-xs font-bold text-purple-900 dark:text-purple-300 flex items-center gap-2">
@@ -1877,7 +1907,7 @@ export default function CPPTEditorModal({
               type="button"
               disabled={isSubmitting || !subjective.trim() || !assessment.trim()}
               onClick={handleConfirm}
-              className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-md shadow-emerald-600/20 disabled:opacity-50 flex items-center gap-2 transition-all cursor-pointer"
+              className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-md shadow-emerald-600/20 disabled:opacity-50 flex items-center gap-2 transition-all"
             >
               {isSubmitting ? (
                 <>
@@ -1886,8 +1916,8 @@ export default function CPPTEditorModal({
                 </>
               ) : (
                 <>
-                  <span>📤</span>
-                  <span>Kirim ke SIMRS</span>
+                  <span>✅</span>
+                  <span>Konfirmasi & Kirim ke SIMRS (MCP)</span>
                 </>
               )}
             </button>
@@ -2145,6 +2175,6 @@ export default function CPPTEditorModal({
         )}
 
       </div>
-    </div >
+    </div>
   );
 }

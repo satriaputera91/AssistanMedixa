@@ -226,7 +226,7 @@ def _generate_fallback_synthesis(
                 "6. **📖 Penjelasan Penyakit & Patofisiologi**: Kriteria diagnosis, staging, dan komplikasi dari Knowledge Management.\n"
                 "7. **🚨 Deteksi Tanda Bahaya & Red Flags**: Identifikasi tanda bahaya dan ambang kegawatdaruratan.\n"
                 "8. **🛡️ Skrining Interaksi & Keamanan Obat**: Analisis DDI, kontraindikasi, dan keamanan obat pasien.\n"
-                "9. **📤 Buat Draft RME**: Buat resume S/O/A/P terintegrasi dan simpan ke SIMRS RME.\n"
+                "9. **📤 Buat Draft CPPT S/O/A/P**: Buat resume S/O/A/P terintegrasi dan simpan ke SIMRS RME.\n"
                 "10. **🎙️ Rekam Konsultasi Klinis (Audio STT)**: Perekaman percakapan klinis, transkripsi, dan resume SOAP otomatis.\n\n"
                 "Ada yang bisa saya bantu untuk konsultasi klinis saat ini?"
             )
@@ -485,7 +485,7 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
             "7. **📖 Penjelasan Penyakit & Patofisiologi**\n"
             "8. **🚨 Deteksi Tanda Bahaya & Red Flags**\n"
             "9. **🛡️ Skrining Interaksi & Keamanan Obat Pasien**\n"
-            "10. **📤 Buat Draft RME ke SIMRS**\n"
+            "10. **📤 Buat Draft CPPT S/O/A/P ke SIMRS**\n"
             "11. **🎙️ Rekaman Konsultasi Klinis (Audio STT)**\n\n"
             "PENTING: JANGAN menampilkan data rekam medis pasien atau tabel dummy jika dokter tidak memintanya."
         )
