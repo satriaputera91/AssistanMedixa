@@ -13,6 +13,16 @@ class AgentStepSchema(BaseModel):
     status: str
     result: Optional[Any] = None
 
+class OutputValidationSchema(BaseModel):
+    is_valid: bool = True
+    status: str = "PASSED"
+    verdict: str = "VALID"
+    validation_score: float = 1.0
+    alerts: List[str] = Field(default_factory=list)
+    remediation_applied: bool = False
+    details: Optional[Dict[str, Any]] = None
+    timestamp: Optional[str] = None
+
 class AgentChatResponse(BaseModel):
     session_id: str
     user_query: str
@@ -22,6 +32,8 @@ class AgentChatResponse(BaseModel):
     workflow_type: Optional[str] = None
     audio_transcript: Optional[str] = None
     soa_note: Optional["SOANoteSchema"] = None
+    output_validation: Optional[OutputValidationSchema] = None
+
 
 
 class SOAContentSchema(BaseModel):

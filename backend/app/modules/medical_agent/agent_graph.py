@@ -32,6 +32,8 @@ from app.modules.medical_agent.tools import (
     tool_patient_drug_safety_screening,
     tool_simrs_update_patient_record
 )
+from app.modules.guardrails.output_validator import LLMOutputValidator
+
 
 # Standard Logger Configuration for AIMedical LangGraph Agent
 logger = logging.getLogger("AIMedical.MedicalAgent")
@@ -257,7 +259,7 @@ Berdasarkan transkrip di atas, susun resume klinis terstruktur dalam format Mark
             "result": "Resume klinis SOAP berhasil disusun.",
         })
         _debug_node_end("audio_soa_summary", f"SOAP clinical note synthesized ({len(final_text)} chars)")
-        _debug_edge("audio_soa_summary", "END")
+        _debug_edge("audio_soa_summary", "validate_output")
         return {**state, "steps_executed": steps, "final_synthesis": final_text, "audio_bytes": None, "workflow_type": "text"}
     except Exception as exc:
         error = f"Resume klinis gagal: {str(exc)[:180]}"
@@ -268,7 +270,7 @@ Berdasarkan transkrip di atas, susun resume klinis terstruktur dalam format Mark
             "result": error,
         })
         _debug_node_end("audio_soa_summary", f"ERROR: {error}")
-        _debug_edge("audio_soa_summary", "END")
+        _debug_edge("audio_soa_summary", "validate_output")
         return {
             **state,
             "steps_executed": steps,
@@ -276,6 +278,7 @@ Berdasarkan transkrip di atas, susun resume klinis terstruktur dalam format Mark
             "audio_bytes": None,
             "workflow_type": "text",
         }
+
 
 
 # Node 1: Clinical Planner & Entity Extractor
@@ -900,12 +903,13 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
             "result": "Panduan pemilihan pasien disampaikan."
         })
         _debug_node_end("synthesis", "No patient selected for patient-specific query. Outputted persuasive guide.")
-        _debug_edge("synthesis", "END")
+        _debug_edge("synthesis", "validate_output")
         return {
             **state,
             "steps_executed": steps,
             "final_synthesis": final_text
         }
+
     elif is_cppt_commit:
         prompt_context = f"Doctor Query: {query}\n\n"
         if simrs_profile:
@@ -1281,12 +1285,66 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
     })
 
     _debug_node_end("synthesis", f"Synthesis Result: {len(final_text)} characters generated")
-    _debug_edge("synthesis", "END")
+    _debug_edge("synthesis", "validate_output")
     return {
         **state,
         "steps_executed": steps,
         "final_synthesis": final_text
     }
+
+
+# Node: Dedicated LLM Output Validation & Clinical Safety Verification
+def node_validate_output(state: MedicalAgentState) -> MedicalAgentState:
+    """
+    Validates the generated clinical synthesis against ground-truth SIMRS records,
+    screens for allergy contraindications, verifies red flag coverage, sanitizes PII/toxic content,
+    and enforces clinical disclaimer compliance.
+    """
+    _debug_node_start("validate_output", state, icon="🛡️")
+    final_synthesis = state.get("final_synthesis", "")
+    steps = list(state.get("steps_executed", []))
+
+    validation_res = LLMOutputValidator.evaluate_all(
+        output_text=final_synthesis,
+        simrs_profile=state.get("simrs_profile"),
+        simrs_anamnesis=state.get("simrs_anamnesis"),
+        simrs_labs=state.get("simrs_lab_evaluations"),
+        red_flag_detections=state.get("red_flag_detections"),
+        drug_safety_screening=state.get("drug_safety_screening")
+    )
+
+    # If auto-remediation occurred (e.g. disclaimer attached or PII redacted), update final text
+    remediated_text = validation_res.get("remediated_text")
+    if remediated_text and remediated_text != final_synthesis:
+        final_synthesis = remediated_text
+
+    step_status = "success" if validation_res["is_valid"] else "failed"
+    step_desc = f"Validasi output klinis: {validation_res['verdict']} (Skor Kepatuhan: {validation_res['validation_score']})"
+    if validation_res.get("alerts"):
+        step_desc += f" - Terdeteksi {len(validation_res['alerts'])} temuan/alert klinis."
+
+    steps.append({
+        "step_name": "Validasi Output LLM & Clinical Safety Guardrail",
+        "description": step_desc,
+        "status": step_status,
+        "result": {
+            "verdict": validation_res["verdict"],
+            "score": validation_res["validation_score"],
+            "alerts": validation_res["alerts"],
+            "remediation_applied": validation_res["remediation_applied"]
+        }
+    })
+
+    _debug_node_end("validate_output", f"Score: {validation_res['validation_score']} | {validation_res['verdict']}")
+    _debug_edge("validate_output", "END")
+
+    return {
+        **state,
+        "steps_executed": steps,
+        "final_synthesis": final_synthesis,
+        "output_validation": validation_res
+    }
+
 
 
 def _generate_fallback_synthesis(
@@ -1717,6 +1775,7 @@ def build_medical_agent_graph(checkpointer=None):
     workflow.add_node("patient_drug_safety", node_patient_drug_safety)
     workflow.add_node("tools", node_execute_tools)
     workflow.add_node("synthesis", node_gemini_synthesis)
+    workflow.add_node("validate_output", node_validate_output)
     workflow.add_node("audio_transcription", node_audio_transcription)
     workflow.add_node("audio_soa_summary", node_audio_soa_summary)
     
@@ -1726,7 +1785,7 @@ def build_medical_agent_graph(checkpointer=None):
         {"audio_transcription": "audio_transcription", "planner": "planner"},
     )
     workflow.add_edge("audio_transcription", "audio_soa_summary")
-    workflow.add_edge("audio_soa_summary", END)
+    workflow.add_edge("audio_soa_summary", "validate_output")
     
     # Conditional edge from planner:
     # - General consultation: routes to "tools" (RAG/KM only) or "synthesis", skipping SIMRS read nodes entirely
@@ -1749,7 +1808,9 @@ def build_medical_agent_graph(checkpointer=None):
     workflow.add_edge("km_medication_recommendation", "patient_drug_safety")
     workflow.add_edge("patient_drug_safety", "tools")
     workflow.add_edge("tools", "synthesis")
-    workflow.add_edge("synthesis", END)
+    workflow.add_edge("synthesis", "validate_output")
+    workflow.add_edge("validate_output", END)
+
     
     if checkpointer is None:
         checkpointer = sqlite_checkpointer
