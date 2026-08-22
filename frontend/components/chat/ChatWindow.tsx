@@ -28,7 +28,7 @@ interface ChatWindowProps {
 
 // FAQ for Active Patient Consultation (SIMRS MCP & EHR Data)
 const PATIENT_FAQS = [
-  { icon: '📋', label: '1. Ambil Informasi Riwayat Pasien', text: 'Ambil data profil demografi, riwayat penyakit kronis, rawat inap pasien dan riwayat catatan perkembangan medis S/O/A/P terakhir' },
+  { icon: '📋', label: '1. Ambil Informasi Riwayat Pasien', text: 'Ambil data profil demografi, riwayat penyakit kronis, rawat inap pasien dan hasil laboratorium' },
   { icon: '📝', label: '2. Ambil Data Anamnesis SIMRS', text: 'Tarik data anamnesis dari modul RME SIMRS.' },
   { icon: '🧪', label: '3. Evaluasi Hasil Lab & Pemeriksaan SIMRS', text: 'Evaluasi hasil laboratorium serial, nilai eGFR, rasio uACR, elektrolit, dan tanda vital dari pasien ini.' },
   { icon: '🎯', label: '4. Rekomendasi Diagnosis & ICD-10 Pasien', text: 'Berikan rekomendasi diagnosis kerja (primer) dan diagnosis banding lengkap beserta kodefikasi ICD-10 dan tingkat keyakinan.' },
@@ -37,7 +37,7 @@ const PATIENT_FAQS = [
   { icon: '📖', label: '7. Penjelasan Patofisiologi Penyakit Pasien', text: 'Tampilkan penjelasan patofisiologi penyakit, kriteria diagnostik baku, dan tahapan klinis (staging) pada pasien ini.' },
   { icon: '🚨', label: '8. Deteksi Tanda Bahaya & Red Flags Pasien', text: 'Lakukan deteksi tanda bahaya klinis (clinical red flags), ambang kedaruratan, dan risiko komplikasi pada pasien ini.' },
   { icon: '🛡️', label: '9. Skrining Interaksi & Keamanan Obat Pasien', text: 'Lakukan skrining interaksi obat-ke-obat (DDI), kontraindikasi riwayat alergi silang, dan keamanan farmakologi pasien ini.' },
-  { icon: '📤', label: '10. Buat & Kirim CPPT S/O/A/P ke SIMRS', text: 'Buat resume catatan perkembangan pasien terintegrasi (CPPT / S-O-A-P) komprehensif dan kirim/sinkronisasikan ke modul RME SIMRS.' },
+  { icon: '📤', label: '10. Buat Draft RME', text: 'Buat resume catatan perkembangan pasien terintegrasi (CPPT / S-O-A-P) komprehensif dan kirim/sinkronisasikan ke modul RME SIMRS.' },
 ];
 
 // FAQ for General Medical Consultation (Knowledge Management, Guidelines, Drug Dosing, Literature)
@@ -414,7 +414,7 @@ export default function ChatWindow({
                         )}
 
                         {/* Interactive Edit & Search ICD-10 Button for Diagnosis Messages */}
-                        {isDiagnosisMessage && (
+                        {/*isDiagnosisMessage && (
                           <div className="mt-3 pt-3 border-t border-emerald-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2">
                             <span className="text-[11px] text-emerald-700 dark:text-slate-400 flex items-center gap-1 font-semibold">
                               <span>🎯</span>
@@ -429,7 +429,7 @@ export default function ChatWindow({
                               <span>Edit & Cari Kode ICD-10</span>
                             </button>
                           </div>
-                        )}
+                        )*/}
 
                         {/* Interactive Edit & Search Medication Button for Therapy Messages */}
                         {isMedicationMessage && (
@@ -518,7 +518,7 @@ export default function ChatWindow({
                       key={idx}
                       type="button"
                       onClick={() => {
-                        if (p.label.includes('Buat & Kirim CPPT') && selectedPatient) {
+                        if ((p.label.includes('Buat Draft RME') || p.label.includes('Draft RME') || p.label.includes('Buat & Kirim CPPT')) && selectedPatient) {
                           let targetIdx: number | null = null;
                           for (let idx = messages.length - 1; idx >= 0; idx--) {
                             const c = messages[idx].content;
@@ -528,7 +528,7 @@ export default function ChatWindow({
                             }
                           }
                           const initialText = targetIdx !== null ? (editedMessages[targetIdx] || messages[targetIdx].content) : '';
-                          const parsed = parseSOAPFromAIText(initialText, messages);
+                          const parsed = parseSOAPFromAIText(initialText, messages, currentPatient);
                           openCpptModal(parsed, targetIdx);
                           return;
                         }
@@ -554,7 +554,7 @@ export default function ChatWindow({
                       key={idx + 5}
                       type="button"
                       onClick={() => {
-                        if (p.label.includes('Buat & Kirim CPPT') && selectedPatient) {
+                        if ((p.label.includes('Buat Draft RME') || p.label.includes('Draft RME') || p.label.includes('Buat & Kirim CPPT')) && selectedPatient) {
                           let targetIdx: number | null = null;
                           for (let idx = messages.length - 1; idx >= 0; idx--) {
                             const c = messages[idx].content;
@@ -564,7 +564,7 @@ export default function ChatWindow({
                             }
                           }
                           const initialText = targetIdx !== null ? (editedMessages[targetIdx] || messages[targetIdx].content) : '';
-                          const parsed = parseSOAPFromAIText(initialText, messages);
+                          const parsed = parseSOAPFromAIText(initialText, messages, currentPatient);
                           openCpptModal(parsed, targetIdx);
                           return;
                         }

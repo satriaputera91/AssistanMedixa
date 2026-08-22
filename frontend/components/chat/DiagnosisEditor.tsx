@@ -668,9 +668,10 @@ export default function DiagnosisEditor({
             <button
               type="button"
               onClick={handleGenerateAndSave}
-              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md"
+              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
             >
-              💾 Simpan & Terapkan Perubahan Diagnosis
+              <span>📤</span>
+              <span>Kirim ke SIMRS</span>
             </button>
           </div>
         </div>

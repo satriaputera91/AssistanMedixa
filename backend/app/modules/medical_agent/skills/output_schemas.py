@@ -1,5 +1,6 @@
 import re
 from typing import List, Optional, Dict, Any, Union
+# pyrefly: ignore [missing-import]
 from pydantic import BaseModel, Field
 from datetime import datetime
 
@@ -14,6 +15,7 @@ MANDATORY_CLINICAL_DISCLAIMER = (
 # Domain Primitive Sub-Schemas
 # ==============================================================================
 
+# pyrefly: ignore [missing-import]
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -308,10 +310,6 @@ class ClinicalSOAPOutputSchema(BaseModel):
 
         if self.plan.follow_up:
             md += f"- **Tindak Lanjut**: {self.plan.follow_up}\n\n"
-
-        if self.drug_safety_status:
-            md += f"🛡️ **Status Skrining Keamanan Obat**: {self.drug_safety_status}\n"
-
         md += MANDATORY_CLINICAL_DISCLAIMER
         return md
 
