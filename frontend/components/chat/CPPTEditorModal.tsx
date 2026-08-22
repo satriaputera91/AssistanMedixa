@@ -35,10 +35,11 @@ function cleanMarkdown(raw: string): string {
     .trim();
 }
 
-// Function to dynamically parse SOAP components from AI generated recommendation markdown
+// Function to dynamically parse SOAP components from AI generated recommendation markdown and structured outputs
 export function parseSOAPFromAIText(
   content: string,
-  allMessages?: Array<{ role: string; content: string }>
+  allMessages?: Array<{ role: string; content: string; metadata?: Record<string, any> | null; structured_output?: any }>,
+  patient?: PatientRecord | null
 ): CPPTContent {
   let s = '';
   let o = '';
@@ -59,60 +60,170 @@ export function parseSOAPFromAIText(
     return '';
   };
 
+  // 1. Priority pass: Extract from structured Pydantic Output if available in allMessages
+  if (allMessages && allMessages.length > 0) {
+    for (let idx = allMessages.length - 1; idx >= 0; idx--) {
+      const msg = allMessages[idx];
+      const struct = (msg as any).structured_output || msg.metadata?.structured_output;
+      if (!struct) continue;
+
+      const soapObj = struct.soap || (struct.assessment && struct.subjective ? struct : null);
+
+      if (soapObj) {
+        // Subjective
+        if (!s && soapObj.subjective) {
+          const subj = soapObj.subjective;
+          const sLines: string[] = [];
+          if (subj.chief_complaint) sLines.push(`- Keluhan Utama: ${subj.chief_complaint}`);
+          if (subj.history_present_illness) sLines.push(`- Riwayat Penyakit Sekarang (RPS): ${subj.history_present_illness}`);
+          if (subj.past_medical_history) sLines.push(`- Riwayat Penyakit Dahulu (RPD): ${subj.past_medical_history}`);
+          if (subj.allergy_history) sLines.push(`- Riwayat Alergi: ${subj.allergy_history}`);
+          if (subj.medication_history) sLines.push(`- Riwayat Obat Rutin: ${subj.medication_history}`);
+          if (sLines.length > 0) s = sLines.join('\n');
+        }
+
+        // Objective
+        if (!o && soapObj.objective) {
+          const obj = soapObj.objective;
+          const oLines: string[] = [];
+          if (obj.vital_signs) {
+            const vs = obj.vital_signs;
+            const vsParts: string[] = [];
+            if (vs.blood_pressure) vsParts.push(`TD ${vs.blood_pressure}`);
+            if (vs.heart_rate) vsParts.push(`HR ${vs.heart_rate}`);
+            if (vs.respiratory_rate) vsParts.push(`RR ${vs.respiratory_rate}`);
+            if (vs.temperature) vsParts.push(`Suhu ${vs.temperature}`);
+            if (vs.spo2) vsParts.push(`SpO2 ${vs.spo2}`);
+            if (vsParts.length > 0) oLines.push(`- Tanda-Tanda Vital: ${vsParts.join(', ')}`);
+          }
+          if (obj.physical_examination) oLines.push(`- Pemeriksaan Fisik: ${obj.physical_examination}`);
+          if (Array.isArray(obj.laboratory_results) && obj.laboratory_results.length > 0) {
+            oLines.push(`- Evaluasi Laboratorium:`);
+            obj.laboratory_results.forEach((l: any) => {
+              const ref = l.reference_range ? ` [Rujukan: ${l.reference_range}]` : '';
+              oLines.push(`  • ${l.test_name}: ${l.value} ${l.unit || ''} (${l.status || 'Normal'})${ref}`);
+            });
+          }
+          if (oLines.length > 0) o = oLines.join('\n');
+        }
+
+        // Assessment
+        if (!a && soapObj.assessment) {
+          const ass = soapObj.assessment;
+          const aLines: string[] = [];
+          if (ass.primary_diagnosis) {
+            const pd = ass.primary_diagnosis;
+            const icd = pd.icd10 ? ` (ICD-10: ${pd.icd10})` : '';
+            const conf = pd.confidence ? ` [Keyakinan AI: ${Math.round(Number(pd.confidence) * (Number(pd.confidence) <= 1 ? 100 : 1))}%]` : '';
+            const note = pd.notes ? ` — ${pd.notes}` : '';
+            aLines.push(`- Diagnosis Primer (Kerja): ${pd.diagnosis}${icd}${conf}${note}`);
+          }
+          if (Array.isArray(ass.differential_diagnoses)) {
+            ass.differential_diagnoses.forEach((dd: any) => {
+              const icd = dd.icd10 ? ` (ICD-10: ${dd.icd10})` : '';
+              const conf = dd.confidence ? ` [Keyakinan AI: ${Math.round(Number(dd.confidence) * (Number(dd.confidence) <= 1 ? 100 : 1))}%]` : '';
+              const note = dd.notes || dd.clinical_clues ? ` — ${dd.notes || dd.clinical_clues}` : '';
+              aLines.push(`- Diagnosis Banding: ${dd.diagnosis}${icd}${conf}${note}`);
+            });
+          }
+          if (ass.clinical_reasoning) aLines.push(`- Penalaran Klinis: ${ass.clinical_reasoning}`);
+          if (aLines.length > 0) a = aLines.join('\n');
+        }
+
+        // Plan
+        if (!p && soapObj.plan) {
+          const pl = soapObj.plan;
+          const pLines: string[] = [];
+          if (Array.isArray(pl.medications) && pl.medications.length > 0) {
+            pLines.push(`- Rekomendasi Terapi Obat:`);
+            pl.medications.forEach((m: any) => {
+              const note = m.notes ? ` (${m.notes})` : '';
+              pLines.push(`  • ${m.drug_name} ${m.dosage || ''} ${m.frequency || ''} ${m.route || 'Oral'}${note}`);
+            });
+          }
+          if (Array.isArray(pl.diagnostic_workup) && pl.diagnostic_workup.length > 0) {
+            pLines.push(`- Pemeriksaan Penunjang: ${pl.diagnostic_workup.join(', ')}`);
+          }
+          if (Array.isArray(pl.clinical_procedures) && pl.clinical_procedures.length > 0) {
+            pLines.push(`- Prosedur / Tindakan Klinis: ${pl.clinical_procedures.join(', ')}`);
+          }
+          if (pl.follow_up) pLines.push(`- Rencana Kontrol / Tindak Lanjut: ${pl.follow_up}`);
+          if (pLines.length > 0) p = pLines.join('\n');
+        }
+
+        // Instructions
+        if (!i_inst) {
+          const iLines: string[] = [];
+          if (soapObj.plan?.patient_education && Array.isArray(soapObj.plan.patient_education)) {
+            soapObj.plan.patient_education.forEach((e: string) => iLines.push(`- Edukasi Pasien: ${e}`));
+          }
+          if (soapObj.red_flags && Array.isArray(soapObj.red_flags)) {
+            soapObj.red_flags.forEach((r: any) => {
+              iLines.push(`- Tanda Bahaya (Red Flag) [${r.severity || 'Peringatan'}]: ${r.title} — ${r.action_required}`);
+            });
+          }
+          if (iLines.length > 0) i_inst = iLines.join('\n');
+        }
+
+        if (s && o && a && p) break;
+      }
+    }
+  }
+
+  // 2. Parse from Content string
   if (content) {
-    // 1. Table row format (| **Subjective (S)** | ... |)
+    // A. Table row format (| **Subjective (S)** | ... |)
     const sTable = extractTableRow(content, /Subjective|👤\s*S\b|\bS\s*\(Subjective\)/i);
     const oTable = extractTableRow(content, /Objective|🔬\s*O\b|\bO\s*\(Objective\)/i);
     const aTable = extractTableRow(content, /Assessment|🎯\s*A\b|\bA\s*\(Assessment\)/i);
     const pTable = extractTableRow(content, /Plan|💊\s*P\b|\bP\s*\(Plan\)/i);
     const iTable = extractTableRow(content, /Instruksi|Instruction|📝\s*I\b|\bI\s*\(Instruksi\)/i);
 
-    if (sTable) s = sTable;
-    if (oTable) o = oTable;
-    if (aTable) a = aTable;
-    if (pTable) p = pTable;
-    if (iTable) i_inst = iTable;
+    if (sTable && !s) s = sTable;
+    if (oTable && !o) o = oTable;
+    if (aTable && !a) a = aTable;
+    if (pTable && !p) p = pTable;
+    if (iTable && !i_inst) i_inst = iTable;
 
-    // 2. Section headers format (### S — Subjective, ### S - Subjective, ### S (Subjective), ### S:, etc.)
+    // B. Section headers format (### 👤 S — Subjective, ### S — Subjective, etc.)
     if (!s) {
-      const sSec = content.match(/(?:###|\*\*)\s*(?:👤\s*)?(?:S\s*[—\-\(:\.]\s*Subjective\)?|Subjective|Hasil Anamnesis)[\s\S]*?(?=(?:###|\*\*)\s*(?:🔬\s*)?(?:O\s*[—\-\(:\.]\s*Objective\)?|Objective|Evaluasi Hasil Lab|Tanda Vital|###\s*🎯|###\s*💊|##\s*📋|$))/i);
+      const sSec = content.match(/(?:###|\*\*|##)\s*(?:👤\s*)?(?:S\s*[—\-:\.]\s*Subjective|Subjective|Hasil Anamnesis)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:🔬\s*)?(?:O\s*[—\-:\.]\s*Objective|Objective|Evaluasi Hasil Lab|Tanda Vital|🎯|💊|📋)|$)/i);
       if (sSec && sSec[0]) {
-        s = cleanMarkdown(sSec[0].replace(/^(?:###|\*\*).*?\n/i, ''));
+        s = cleanMarkdown(sSec[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
       }
     }
 
     if (!o) {
-      const oSec = content.match(/(?:###|\*\*)\s*(?:🔬\s*)?(?:O\s*[—\-\(:\.]\s*Objective\)?|Objective|Evaluasi Hasil Lab|Tanda Vital)[\s\S]*?(?=(?:###|\*\*)\s*(?:🎯\s*)?(?:A\s*[—\-\(:\.]\s*Assessment\)?|Assessment|Rekomendasi Diagnosis|###\s*💊|##\s*📋|$))/i);
+      const oSec = content.match(/(?:###|\*\*|##)\s*(?:🔬\s*)?(?:O\s*[—\-:\.]\s*Objective|Objective|Evaluasi Hasil Lab|Tanda Vital)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:🎯\s*)?(?:A\s*[—\-:\.]\s*Assessment|Assessment|Rekomendasi Diagnosis|💊|📋)|$)/i);
       if (oSec && oSec[0]) {
-        o = cleanMarkdown(oSec[0].replace(/^(?:###|\*\*).*?\n/i, ''));
+        o = cleanMarkdown(oSec[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
       }
     }
 
     if (!a) {
-      const aSec = content.match(/(?:###|\*\*)\s*(?:🎯\s*)?(?:A\s*[—\-\(:\.]\s*Assessment\)?|Assessment|Rekomendasi Diagnosis|Diagnosis Kerja)[\s\S]*?(?=(?:###|\*\*)\s*(?:💊\s*)?(?:P\s*[—\-\(:\.]\s*Plan\)?|Plan|Rekomendasi Terapi Obat|Rejimen|##\s*📋|$))/i);
+      const aSec = content.match(/(?:###|\*\*|##)\s*(?:🎯\s*)?(?:A\s*[—\-:\.]\s*Assessment|Assessment|Rekomendasi Diagnosis|Diagnosis Kerja)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:💊\s*)?(?:P\s*[—\-:\.]\s*Plan|Plan|Rekomendasi Terapi Obat|Rejimen|📋)|$)/i);
       if (aSec && aSec[0]) {
-        a = cleanMarkdown(aSec[0].replace(/^(?:###|\*\*).*?\n/i, ''));
+        a = cleanMarkdown(aSec[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
       }
     }
 
     if (!p) {
-      const pSec = content.match(/(?:###|\*\*)\s*(?:💊\s*)?(?:P\s*[—\-\(:\.]\s*Plan.*?|Plan|Rekomendasi Terapi Obat|Rejimen Farmakoterapi)[\s\S]*?(?=(?:###|\*\*)\s*(?:📝\s*)?(?:I\s*[—\-\(:\.]\s*Instruksi\)?|Instruksi|###\s*🛡️|---\n|\*\(⚠️|##\s*📋|$))/i);
+      const pSec = content.match(/(?:###|\*\*|##)\s*(?:💊\s*)?(?:P\s*[—\-:\.]\s*Plan.*?|Plan|Rekomendasi Terapi Obat|Rejimen Farmakoterapi)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:📝\s*)?(?:I\s*[—\-:\.]\s*Instruksi|Instruksi|Instruksi PPA|Instruksi Klinis|Edukasi Pasien|Tanda Bahaya|🛡️|📋)|---\n|\*\(⚠️|$)/i);
       if (pSec && pSec[0]) {
-        p = cleanMarkdown(pSec[0].replace(/^(?:###|\*\*).*?\n/i, ''));
+        p = cleanMarkdown(pSec[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
       }
     }
 
     if (!i_inst) {
-      const iSec = content.match(/(?:###|\*\*)\s*(?:📝\s*)?(?:I\s*[—\-\(:\.]\s*Instruksi\)?|Instruksi.*?|Instruksi PPA|Instruksi Klinis)[\s\S]*?(?=(?:###\s*🛡️|---\n|\*\(⚠️|##\s*📋|$))/i);
+      const iSec = content.match(/(?:###|\*\*|##)\s*(?:📝\s*)?(?:I\s*[—\-:\.]\s*Instruksi|Instruksi.*?|Instruksi PPA|Instruksi Klinis|Edukasi Pasien|Tanda Bahaya)[\s\S]*?(?=(?:###\s*🛡️|---\n|\*\(⚠️|##\s*📋|$))/i);
       if (iSec && iSec[0]) {
-        i_inst = cleanMarkdown(iSec[0].replace(/^(?:###|\*\*).*?\n/i, ''));
+        i_inst = cleanMarkdown(iSec[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
       }
     }
   }
 
   // 3. Scan previous assistant messages in the conversation (prioritize audio recordings / diarized summaries!)
-  if (allMessages && allMessages.length > 0) {
-    // First priority pass: Check if there is an audio diarized / SOAP note message
+  if (allMessages && allMessages.length > 0 && (!s || !o || !a || !p)) {
     for (let i = allMessages.length - 1; i >= 0; i--) {
       const msg = allMessages[i];
       if (msg.role !== 'assistant') continue;
@@ -121,58 +232,63 @@ export function parseSOAPFromAIText(
       if (
         t.includes('Resume Klinis (S-O-A-P)') ||
         t.includes('Transkrip Percakapan Medis') ||
-        (t.includes('S — Subjective') && t.includes('O — Objective'))
+        (t.includes('S — Subjective') && t.includes('O — Objective')) ||
+        t.includes('CPPT')
       ) {
-        const audioS = t.match(/(?:###|\*\*)\s*(?:👤\s*)?(?:S\s*[—\-\(:\.]\s*Subjective\)?|Subjective)[\s\S]*?(?=(?:###|\*\*)\s*(?:🔬\s*)?(?:O\s*[—\-\(:\.]\s*Objective\)?|Objective|###\s*🎯|###\s*💊|##\s*📋|$))/i);
-        const audioO = t.match(/(?:###|\*\*)\s*(?:🔬\s*)?(?:O\s*[—\-\(:\.]\s*Objective\)?|Objective)[\s\S]*?(?=(?:###|\*\*)\s*(?:🎯\s*)?(?:A\s*[—\-\(:\.]\s*Assessment\)?|Assessment|###\s*💊|##\s*📋|$))/i);
-        const audioA = t.match(/(?:###|\*\*)\s*(?:🎯\s*)?(?:A\s*[—\-\(:\.]\s*Assessment\)?|Assessment)[\s\S]*?(?=(?:###|\*\*)\s*(?:💊\s*)?(?:P\s*[—\-\(:\.]\s*Plan\)?|Plan|##\s*📋|$))/i);
-        const audioP = t.match(/(?:###|\*\*)\s*(?:💊\s*)?(?:P\s*[—\-\(:\.]\s*Plan.*?|Plan)[\s\S]*?(?=(?:###|\*\*)\s*(?:📝\s*)?(?:I\s*[—\-\(:\.]\s*Instruksi\)?|Instruksi|###\s*🛡️|---\n|\*\(⚠️|##\s*📋|$))/i);
-        const audioI = t.match(/(?:###|\*\*)\s*(?:📝\s*)?(?:I\s*[—\-\(:\.]\s*Instruksi\)?|Instruksi)[\s\S]*?(?=(?:###\s*🛡️|---\n|\*\(⚠️|##\s*📋|$))/i);
+        const audioS = t.match(/(?:###|\*\*|##)\s*(?:👤\s*)?(?:S\s*[—\-:\.]\s*Subjective|Subjective)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:🔬\s*)?(?:O\s*[—\-:\.]\s*Objective|Objective|🎯|💊|📋)|$)/i);
+        const audioO = t.match(/(?:###|\*\*|##)\s*(?:🔬\s*)?(?:O\s*[—\-:\.]\s*Objective|Objective)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:🎯\s*)?(?:A\s*[—\-:\.]\s*Assessment|Assessment|💊|📋)|$)/i);
+        const audioA = t.match(/(?:###|\*\*|##)\s*(?:🎯\s*)?(?:A\s*[—\-:\.]\s*Assessment|Assessment)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:💊\s*)?(?:P\s*[—\-:\.]\s*Plan|Plan|📋)|$)/i);
+        const audioP = t.match(/(?:###|\*\*|##)\s*(?:💊\s*)?(?:P\s*[—\-:\.]\s*Plan.*?|Plan)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:📝\s*)?(?:I\s*[—\-:\.]\s*Instruksi|Instruksi|🛡️)|---\n|\*\(⚠️|##\s*📋|$)/i);
+        const audioI = t.match(/(?:###|\*\*|##)\s*(?:📝\s*)?(?:I\s*[—\-:\.]\s*Instruksi|Instruksi)[\s\S]*?(?=(?:###\s*🛡️|---\n|\*\(⚠️|##\s*📋|$))/i);
 
-        if (!s && audioS && audioS[0]) s = cleanMarkdown(audioS[0].replace(/^(?:###|\*\*).*?\n/i, ''));
-        if (!o && audioO && audioO[0]) o = cleanMarkdown(audioO[0].replace(/^(?:###|\*\*).*?\n/i, ''));
-        if (!a && audioA && audioA[0]) a = cleanMarkdown(audioA[0].replace(/^(?:###|\*\*).*?\n/i, ''));
-        if (!p && audioP && audioP[0]) p = cleanMarkdown(audioP[0].replace(/^(?:###|\*\*).*?\n/i, ''));
-        if (!i_inst && audioI && audioI[0]) i_inst = cleanMarkdown(audioI[0].replace(/^(?:###|\*\*).*?\n/i, ''));
+        if (!s && audioS && audioS[0]) s = cleanMarkdown(audioS[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
+        if (!o && audioO && audioO[0]) o = cleanMarkdown(audioO[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
+        if (!a && audioA && audioA[0]) a = cleanMarkdown(audioA[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
+        if (!p && audioP && audioP[0]) p = cleanMarkdown(audioP[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
+        if (!i_inst && audioI && audioI[0]) i_inst = cleanMarkdown(audioI[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
 
         if (s && o && a && p) break;
       }
     }
+  }
 
-    // Second fallback pass: scan individual clinical response tables
-    for (let i = allMessages.length - 1; i >= 0; i--) {
-      const msg = allMessages[i];
-      if (msg.role !== 'assistant') continue;
-      const t = msg.content;
-
-      if (!s && (t.includes('Hasil Anamnesis') || t.includes('Keluhan Utama') || t.includes('Riwayat Penyakit Sekarang'))) {
-        const sMatch = t.match(/##\s*📝\s*Hasil Anamnesis[\s\S]*?(?=(?:##|###\s*🎯|###\s*💊|$))/i);
-        if (sMatch) s = cleanMarkdown(sMatch[0]);
-      }
-
-      if (!o && (t.includes('Evaluasi Hasil Lab') || t.includes('Hasil Laboratorium') || t.includes('Tanda Vital') || t.includes('Pemeriksaan Penunjang'))) {
-        const oMatch = t.match(/###.*?(?:Evaluasi Hasil Lab|Hasil Laboratorium|Tanda-Tanda Vital)[\s\S]*?(?=(?:###|---\n|$))/i);
-        if (oMatch) o = cleanMarkdown(oMatch[0]);
-      }
-
-      if (!a && (t.includes('Diagnosis Kerja') || t.includes('Rekomendasi Diagnosis') || t.includes('ICD-10'))) {
-        const aMatch = t.match(/###.*?(?:Diagnosis Kerja|Rekomendasi Diagnosis)[\s\S]*?(?=(?:###|---\n|$))/i);
-        if (aMatch) a = cleanMarkdown(aMatch[0]);
-      }
-
-      if (!p && (t.includes('Rekomendasi Terapi Obat') || t.includes('Rejimen Farmakoterapi') || t.includes('Dosis'))) {
-        const pMatch = t.match(/###.*?(?:Rekomendasi Terapi Obat|Rejimen Farmakoterapi)[\s\S]*?(?=(?:###|---\n|$))/i);
-        if (pMatch) p = cleanMarkdown(pMatch[0]);
-      }
+  // 4. Fallback from patient record if still missing
+  if (!s && patient) {
+    const sParts: string[] = [];
+    if (patient.allergies && patient.allergies.length > 0) sParts.push(`- Riwayat Alergi: ${patient.allergies.join(', ')}`);
+    if (patient.current_medications && patient.current_medications.length > 0) {
+      sParts.push(`- Riwayat Obat Rutin: ${patient.current_medications.map(m => `${m.name} ${m.dosage || ''}`).join(', ')}`);
     }
+    if (patient.diagnoses && patient.diagnoses.length > 0) sParts.push(`- Riwayat Penyakit Dahulu: ${patient.diagnoses.join(', ')}`);
+    if (sParts.length > 0) s = sParts.join('\n');
+  }
+
+  if (!o && patient?.vitals && Object.keys(patient.vitals).length > 0) {
+    const v = patient.vitals as Record<string, string>;
+    const vitalsStr = [
+      v.bp || v.blood_pressure ? `TD ${v.bp || v.blood_pressure}` : '',
+      v.hr || v.heart_rate ? `HR ${v.hr || v.heart_rate}` : '',
+      v.rr || v.respiratory_rate ? `RR ${v.rr || v.respiratory_rate}` : '',
+      v.temp || v.temperature ? `Suhu ${v.temp || v.temperature}` : '',
+      v.spo2 ? `SpO2 ${v.spo2}` : ''
+    ].filter(Boolean).join(', ');
+    if (vitalsStr) o = `- Tanda Vital Pasien (SIMRS): ${vitalsStr}`;
+  }
+
+  if (!a && patient?.diagnoses && patient.diagnoses.length > 0) {
+    a = `- Diagnosis Primer (SIMRS): ${patient.diagnoses[0]}\n${patient.diagnoses.slice(1).map(d => `- Diagnosis Banding: ${d}`).join('\n')}`;
+  }
+
+  if (!p && patient?.current_medications && patient.current_medications.length > 0) {
+    p = `- Lanjutkan Terapi Rutin SIMRS:\n${patient.current_medications.map(m => `  • ${m.name} ${m.dosage || ''}`).join('\n')}\n- Kontrol poliklinik berkala.`;
   }
 
   return {
-    subjective: s || 'Keluhan dan riwayat yang dihasilkan oleh analisis AI.',
-    objective: o || 'Hasil evaluasi tanda vital dan data pemeriksaan objektif dari AI.',
-    assessment: a || 'Rekomendasi diagnosis kerja dan kodefikasi ICD-10 dari AI.',
-    plan: p || 'Rencana tata laksana, terapi obat, dan pemeriksaan lanjutan rekomendasi AI.',
-    instructions: i_inst || 'Edukasi kepatuhan minum obat teratur, kontrol poli berkala dalam 2-4 minggu, dan segera ke IGD jika muncul tanda bahaya (red flags).'
+    subjective: s || '- Keluhan Utama: Pasien datang untuk kontrol berkala.\n- Riwayat Penyakit Sekarang: Evaluasi keluhan klinis.',
+    objective: o || '- Tanda-Tanda Vital: Dalam batas evaluasi klinis.\n- Hasil Pemeriksaan Penunjang: Evaluasi laboratorium terlampir.',
+    assessment: a || '- Diagnosis Kerja: Evaluasi klinis dan kodefikasi ICD-10.',
+    plan: p || '- Terapi Farmakoterapi & Rencana Penatalaksanaan Lanjutan.',
+    instructions: i_inst || '- Edukasi kepatuhan minum obat teratur.\n- Kontrol poliklinik berkala dalam 2-4 minggu.\n- Segera ke IGD bila timbul tanda bahaya (red flags).'
   };
 }
 
@@ -1033,13 +1149,28 @@ export default function CPPTEditorModal({
   useEffect(() => {
     if (!isOpen) return;
 
-    // Populate strictly from AI generated recommendations (initialContent)
-    setSubjective(initialContent?.subjective || '');
-    setObjective(initialContent?.objective || '');
-    setAssessment(initialContent?.assessment || '');
-    setPlan(initialContent?.plan || '');
-    setInstructions(initialContent?.instructions || '');
-  }, [isOpen, initialContent]);
+    let s = initialContent?.subjective || '';
+    let o = initialContent?.objective || '';
+    let a = initialContent?.assessment || '';
+    let p = initialContent?.plan || '';
+    let inst = initialContent?.instructions || '';
+
+    // If any section is missing or empty, extract from messages/patient
+    if (!s || !o || !a || !p) {
+      const parsed = parseSOAPFromAIText('', messages, patient);
+      if (!s) s = parsed.subjective;
+      if (!o) o = parsed.objective;
+      if (!a) a = parsed.assessment;
+      if (!p) p = parsed.plan;
+      if (!inst) inst = parsed.instructions || '';
+    }
+
+    setSubjective(s);
+    setObjective(o);
+    setAssessment(a);
+    setPlan(p);
+    setInstructions(inst);
+  }, [isOpen, initialContent, messages, patient]);
 
   if (!isOpen) return null;
 
