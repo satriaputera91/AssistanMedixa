@@ -116,12 +116,31 @@ def _get_caller_info() -> str:
 def _debug_node_start(node_name: str, state: MedicalAgentState, icon: str = "🔵"):
     caller_loc = _get_caller_info()
     pid = state.get("patient_id") or "N/A"
+    
+    # Extract patient name from state profile/ehr or database
+    pname = None
+    if state.get("simrs_profile") and isinstance(state.get("simrs_profile"), dict):
+        pname = state["simrs_profile"].get("full_name")
+    elif state.get("ehr_data") and isinstance(state.get("ehr_data"), dict):
+        pname = state["ehr_data"].get("name")
+    
+    if not pname and pid and pid != "N/A":
+        try:
+            from app.core.database import db
+            p_rec = db.patient_records.get(pid)
+            if p_rec:
+                pname = p_rec.get("name")
+        except Exception:
+            pass
+
+    patient_str = f"{pid} ({pname})" if pname else pid
     query = (state.get("user_query") or state.get("audio_filename") or "")
     if len(query) > 65:
         query = query[:62] + "..."
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    msg = f"{icon} [LANGGRAPH NODE START] >>> {node_name} | Patient: {pid} | Query: '{query}'"
+    msg = f"{icon} [LANGGRAPH NODE START] >>> {node_name} | Patient: {patient_str} | Query: '{query}'"
     print(f"{ts} | INFO    | {caller_loc} | {msg}")
+
 
 
 def _debug_node_end(node_name: str, result_summary: str = ""):
@@ -441,28 +460,40 @@ def node_planner(state: MedicalAgentState) -> MedicalAgentState:
 
     simrs_mrn = f"MRN-SIMRS-{patient_id.replace('P-', '')}"
     
+    # Extract patient name for planner logs
+    patient_name = None
+    try:
+        from app.core.database import db
+        p_rec = db.patient_records.get(patient_id)
+        if p_rec:
+            patient_name = p_rec.get("name")
+    except Exception:
+        pass
+    pat_str = f"{patient_id} ({patient_name})" if patient_name else patient_id
+    
     if detected_intent:
         steps.append({
             "step_name": "Agent Intelligence & Clinical Planner",
-            "description": f"Clinical Intent Detected: '{detected_intent}' (Target MRN: {simrs_mrn})",
+            "description": f"Clinical Intent Detected: '{detected_intent}' (Target Patient: {pat_str}, MRN: {simrs_mrn})",
             "status": "completed",
-            "result": {"detected_intent": detected_intent, "simrs_mrn": simrs_mrn}
+            "result": {"detected_intent": detected_intent, "simrs_mrn": simrs_mrn, "patient_name": patient_name}
         })
-        _debug_node_end("planner", f"Intent: '{detected_intent}' | MRN: {simrs_mrn}")
+        _debug_node_end("planner", f"Intent: '{detected_intent}' | Patient: {pat_str} | MRN: {simrs_mrn}")
     else:
         steps.append({
             "step_name": "Agent Intelligence & Conversation Handler",
-            "description": "Tidak ada intent klinis khusus yang terdeteksi. Merespons kueri secara percakapan langsung.",
+            "description": f"Tidak ada intent klinis khusus yang terdeteksi ({pat_str}). Merespons kueri secara percakapan langsung.",
             "status": "completed",
-            "result": {"detected_intent": None}
+            "result": {"detected_intent": None, "patient_name": patient_name}
         })
-        _debug_node_end("planner", "Intent: None (Direct conversation)")
+        _debug_node_end("planner", f"Intent: None (Direct conversation) | Patient: {pat_str}")
 
     return {
         **state,
         "detected_intent": detected_intent,
         "steps_executed": steps
     }
+
 
 
 # Node 2: SIMRS MCP & Patient Medical History Retrieval Workflow Node
