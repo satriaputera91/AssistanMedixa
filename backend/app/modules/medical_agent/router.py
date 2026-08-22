@@ -10,11 +10,11 @@ from fastapi.responses import StreamingResponse
 from app.core.security import get_current_user, TokenPayload, require_role
 from app.core.database import db
 from app.core.config import settings
-from app.modules.medical_agent.schemas import (
+from app.modules.medical_agent import (
     AgentChatRequest, AgentChatResponse, SOAContentSchema, SOANoteSchema,
     SOAReviewRequest, SOAReviewResponse, SOAConfirmationRequest,
+    medical_agent_graph
 )
-from app.modules.medical_agent.agent_graph import medical_agent_graph
 
 router = APIRouter(prefix="/agent", tags=["Medical Agent"])
 

@@ -6,9 +6,8 @@ backend_dir = Path(__file__).resolve().parents[1]
 if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
-import unittest
 from app.modules.guardrails.output_validator import LLMOutputValidator
-from app.modules.medical_agent.agent_graph import medical_agent_graph
+from app.modules.medical_agent import medical_agent_graph
 
 
 
@@ -153,7 +152,7 @@ def test_evaluate_all_comprehensive():
 
 
 def test_pydantic_soap_schema_to_markdown():
-    from app.modules.medical_agent.output_schemas import (
+    from app.modules.medical_agent import (
         ClinicalSOAPOutputSchema, SubjectiveData, ObjectiveData, VitalSignsData,
         LabItemData, AssessmentData, DiagnosisItemData, PlanData, MedicationItemData,
         RedFlagData, PatientDemographicsData
@@ -187,7 +186,7 @@ def test_pydantic_soap_schema_to_markdown():
 
 
 def test_pydantic_general_knowledge_schema_to_markdown():
-    from app.modules.medical_agent.output_schemas import (
+    from app.modules.medical_agent import (
         GeneralConsultationKnowledgeSchema, MedicationItemData, RedFlagData
     )
     knowledge = GeneralConsultationKnowledgeSchema(
