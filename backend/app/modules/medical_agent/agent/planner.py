@@ -62,12 +62,10 @@ def node_planner(state: MedicalAgentState) -> MedicalAgentState:
     # 2. PATIENT-SPECIFIC CLINICAL CONSULTATION (Connected with SIMRS)
     if any(k in query_lower for k in ["buat cppt", "kirim cppt", "kirim soap", "buat soap", "sinkronisasi cppt", "simpan cppt", "kirim/sinkronisasikan", "update simrs", "sync simrs", "commit emr", "kirim ke simrs", "kirim/sinkronisasi"]):
         detected_intent = "10. Buat Draft CPPT S/O/A/P"
-    elif any(k in query_lower for k in ["ambil informasi riwayat", "ambil data profil", "profil demografi", "riwayat penyakit kronis", "rawat inap", "riwayat pasien", "informasi riwayat", "catatan perkembangan", "riwayat catatan", "s/o/a/p", "soap terakhir", "progress note", "admission"]):
-        detected_intent = "1. Ambil Informasi Riwayat Pasien (SIMRS MCP)"
+    elif any(k in query_lower for k in ["ambil informasi demografi", "ambil informasi riwayat", "ambil data profil", "profil demografi", "demografi pasien", "demografi", "profil pasien", "identitas pasien", "data demografi"]):
+        detected_intent = "1. Ambil Informasi Demografi Pasien (SIMRS MCP)"
     elif any(k in query_lower for k in ["anamnesis", "keluhan", "rps", "rpd", "rpk", "tinjauan sistem"]):
         detected_intent = "2. Ambil Data Anamnesis SIMRS (MCP)"
-    elif any(k in query_lower for k in ["riwayat", "demografi"]):
-        detected_intent = "1. Ambil Informasi Riwayat Pasien (SIMRS MCP)"
     elif any(k in query_lower for k in ["lab", "laboratorium", "ttv", "tanda vital", "egfr", "uacr", "hba1c", "elektrolit", "tensi"]):
         detected_intent = "3. Evaluasi Hasil Lab & Pemeriksaan SIMRS (MCP)"
     elif any(k in query_lower for k in ["diagnosis", "icd", "banding", "differential"]):

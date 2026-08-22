@@ -66,11 +66,11 @@ class TestMedicalAgentScenarios(unittest.TestCase):
         self.assertTrue(any("Planner" in name or "Conversation" in name for name in step_names))
 
     def test_02_patient_history_and_demographics_scenario(self):
-        """Scenario 2: FAQ 1 - Retrieve patient demographics, chronic history, admissions, and labs from SIMRS."""
+        """Scenario 2: FAQ 1 - Retrieve patient demographics from SIMRS."""
         state: MedicalAgentState = {
-            "messages": [{"role": "user", "content": "Ambil data profil demografi, riwayat penyakit kronis, rawat inap pasien dan hasil laboratorium"}],
+            "messages": [{"role": "user", "content": "Ambil data profil demografi pasien dari modul RME SIMRS"}],
             "patient_id": "P-10492",
-            "user_query": "Ambil data profil demografi, riwayat penyakit kronis, rawat inap pasien dan hasil laboratorium",
+            "user_query": "Ambil data profil demografi pasien dari modul RME SIMRS",
             "workflow_type": "text",
             "steps_executed": [],
             "final_synthesis": ""
@@ -81,9 +81,7 @@ class TestMedicalAgentScenarios(unittest.TestCase):
         self.assertIsNotNone(res.get("simrs_profile"))
         self.assertEqual(res["simrs_profile"]["mrn"], "MRN-SIMRS-10492")
         self.assertIn("Eleanor Vance", res["simrs_profile"]["full_name"])
-        self.assertIsNotNone(res.get("simrs_history"))
-        self.assertTrue(len(res["simrs_history"]["chronic_conditions"]) > 0)
-        self.assertTrue(any(k in res["final_synthesis"] for k in ["Eleanor Vance", "MRN-SIMRS-10492", "Profil", "Riwayat", "Informasi Riwayat"]))
+        self.assertTrue(any(k in res["final_synthesis"] for k in ["Eleanor Vance", "MRN-SIMRS-10492", "Profil", "Demografi"]))
 
     def test_03_patient_anamnesis_retrieval_scenario(self):
         """Scenario 3: FAQ 2 - Retrieve patient clinical anamnesis (Keluhan Utama, RPS, RPD, RPK)."""

@@ -27,41 +27,34 @@ def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
         if simrs_prof_res.get("status") == "success":
             simrs_profile = simrs_prof_res["profile"]
             steps.append({
-                "step_name": "Ambil Profil & Demografi Pasien SIMRS (MCP)",
-                "description": f"Mengambil data demografi, NIK, dan BPJS pasien melalui Model Context Protocol ({simrs_mrn})",
-                "status": "success",
-                "result": f"Nama: {simrs_profile['full_name']} | NIK: {simrs_profile['nik']} | BPJS: {simrs_profile['bpjs_card_no']} ({simrs_profile['bpjs_class']})"
-            })
-        else:
-            steps.append({
-                "step_name": "Ambil Profil & Demografi Pasien SIMRS (MCP)",
-                "description": f"Mencari profil pasien di SIMRS ({simrs_mrn})",
-                "status": "info",
-                "result": f"Data profil demografi untuk {simrs_mrn} tidak ditemukan di SIMRS."
-            })
-            
-        # Step 2B: Query SIMRS Chronic Conditions, Past Admissions & SOAP Notes via MCP
-        simrs_hist_res = tool_simrs_get_patient_history(simrs_mrn)
-        if simrs_hist_res.get("status") == "success":
-            simrs_history = simrs_hist_res["history"]
-            soap_note = simrs_history.get("last_soap_progress_note", {})
-            steps.append({
-                "step_name": "1. Ambil Informasi Riwayat Pasien (SIMRS MCP)",
-                "description": f"Mengambil riwayat penyakit kronis, riwayat rawat inap, catatan alergi, dan riwayat klinis dari basis data SIMRS",
+                "step_name": "1. Ambil Informasi Demografi Pasien (SIMRS MCP)",
+                "description": f"Mengambil data identitas, demografi, NIK, dan BPJS pasien melalui Model Context Protocol ({simrs_mrn})",
                 "status": "success",
                 "result": {
-                    "penyakit_kronis": simrs_history.get("chronic_conditions", []),
-                    "riwayat_rawat_inap": simrs_history.get("past_admissions", []),
-                    "catatan_perkembangan_soap": soap_note
+                    "mrn": simrs_profile.get("mrn"),
+                    "nama_lengkap": simrs_profile.get("full_name"),
+                    "nik": simrs_profile.get("nik"),
+                    "usia": simrs_profile.get("age"),
+                    "jenis_kelamin": simrs_profile.get("gender"),
+                    "golongan_darah": simrs_profile.get("blood_type"),
+                    "no_bpjs": simrs_profile.get("bpjs_card_no"),
+                    "kelas_bpjs": simrs_profile.get("bpjs_class"),
+                    "poliklinik": simrs_profile.get("active_clinic"),
+                    "dpjp": simrs_profile.get("attending_physician")
                 }
             })
         else:
             steps.append({
-                "step_name": "1. Ambil Informasi Riwayat Pasien (SIMRS MCP)",
-                "description": f"Mencari riwayat penyakit kronis dan rawat inap di SIMRS ({simrs_mrn})",
+                "step_name": "1. Ambil Informasi Demografi Pasien (SIMRS MCP)",
+                "description": f"Mencari profil demografi pasien di SIMRS ({simrs_mrn})",
                 "status": "info",
-                "result": f"Data riwayat penyakit kronis & rawat inap untuk {simrs_mrn} tidak ditemukan di SIMRS."
+                "result": f"Data profil demografi untuk {simrs_mrn} tidak ditemukan di SIMRS."
             })
+            
+        # Optional: Query history for downstream nodes if needed
+        simrs_hist_res = tool_simrs_get_patient_history(simrs_mrn)
+        if simrs_hist_res.get("status") == "success":
+            simrs_history = simrs_hist_res["history"]
 
         # Step 2C: Query Local EHR Database (Diagnoses, Allergies, Medications, Labs)
         if patient_id:

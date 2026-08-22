@@ -28,7 +28,7 @@ interface ChatWindowProps {
 
 // FAQ for Active Patient Consultation (SIMRS MCP & EHR Data)
 const PATIENT_FAQS = [
-  { icon: '📋', label: '1. Ambil Informasi Riwayat Pasien', text: 'Ambil data profil demografi, riwayat penyakit kronis, rawat inap pasien dan hasil laboratorium' },
+  { icon: '📋', label: '1. Ambil Informasi Demografi Pasien', text: 'Ambil data profil demografi pasien dari modul RME SIMRS.' },
   { icon: '📝', label: '2. Ambil Data Anamnesis SIMRS', text: 'Tarik data anamnesis dari modul RME SIMRS.' },
   { icon: '🧪', label: '3. Evaluasi Hasil Lab & Pemeriksaan SIMRS', text: 'Evaluasi hasil laboratorium serial, nilai eGFR, rasio uACR, elektrolit, dan tanda vital dari pasien ini.' },
   { icon: '🎯', label: '4. Rekomendasi Diagnosis & ICD-10 Pasien', text: 'Berikan rekomendasi diagnosis kerja (primer) dan diagnosis banding lengkap beserta kodefikasi ICD-10 dan tingkat keyakinan.' },
@@ -395,7 +395,7 @@ export default function ChatWindow({
                         )}
 
                         {/* Interactive Edit Button for Anamnesis Messages */}
-                        {isAnamnesisMessage && (
+                        {/* {isAnamnesisMessage && (
                           <div className="mt-3 pt-3 border-t border-emerald-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2">
 
                             <span className="text-[11px] text-emerald-700 dark:text-slate-400 flex items-center gap-1 font-semibold">
@@ -411,7 +411,7 @@ export default function ChatWindow({
                               <span>Edit & Sesuaikan Tabel Anamnesis</span>
                             </button>
                           </div>
-                        )}
+                        )} */}
 
                         {/* Interactive Edit & Search ICD-10 Button for Diagnosis Messages */}
                         {/*isDiagnosisMessage && (
@@ -432,7 +432,7 @@ export default function ChatWindow({
                         )*/}
 
                         {/* Interactive Edit & Search Medication Button for Therapy Messages */}
-                        {isMedicationMessage && (
+                        {/* {isMedicationMessage && (
                           <div className="mt-3 pt-3 border-t border-emerald-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2">
                             <span className="text-[11px] text-teal-700 dark:text-teal-400 flex items-center gap-1 font-semibold">
                               <span>💊</span>
@@ -447,10 +447,10 @@ export default function ChatWindow({
                               <span>Edit & Cari Rekomendasi Obat</span>
                             </button>
                           </div>
-                        )}
+                        )} */}
 
                         {/* Interactive Edit & Confirm Button for CPPT / SOAP Messages */}
-                        {isCPPTMessage && (
+                        {/* {isCPPTMessage && (
                           <div className="mt-3 pt-3 border-t border-emerald-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2">
                             <span className="text-[11px] text-emerald-700 dark:text-slate-400 flex items-center gap-1 font-semibold">
                               <span>📋</span>
@@ -468,7 +468,7 @@ export default function ChatWindow({
                               <span>Edit & Konfirmasi CPPT ke SIMRS</span>
                             </button>
                           </div>
-                        )}
+                        )} */}
 
                         <WorkflowExpandable steps={m.metadata?.steps} />
                       </>

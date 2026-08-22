@@ -139,76 +139,24 @@ def _generate_fallback_synthesis(
 
     if is_patient_history_only:
         lines = []
-        lines.append("## 📋 Informasi Riwayat Medis & Demografi Pasien (SIMRS MCP)\n")
+        lines.append("## 📋 Informasi Profil & Demografi Pasien (SIMRS MCP)\n")
         
-        # 1. Profil & Demografi
-        lines.append("### 👤 Profil & Demografi Pasien")
+        # Profil & Demografi Pasien
         if simrs_profile:
-            lines.append("| Parameter | Keterangan |")
+            lines.append("| Parameter Demografi | Keterangan Data SIMRS |")
             lines.append("| :--- | :--- |")
-            lines.append(f"| **Nama Pasien** | {simrs_profile.get('full_name', '-')} |")
+            lines.append(f"| **Nama Pasien** | **{simrs_profile.get('full_name', '-')}** |")
             lines.append(f"| **No. Rekam Medis (MRN)** | `{simrs_profile.get('mrn', '-')}` |")
-            lines.append(f"| **NIK** | {simrs_profile.get('nik', '-')} |")
+            lines.append(f"| **Nomor Induk Kependudukan (NIK)** | `{simrs_profile.get('nik', '-')}` |")
             lines.append(f"| **Usia / Gender** | {simrs_profile.get('age', '-')} tahun / {simrs_profile.get('gender', '-')} |")
-            lines.append(f"| **Status Jaminan (BPJS)** | {simrs_profile.get('bpjs_card_no', '-')} ({simrs_profile.get('bpjs_class', '-')}) |")
             lines.append(f"| **Golongan Darah** | {simrs_profile.get('blood_type', '-')} |")
+            lines.append(f"| **Status Jaminan (BPJS)** | {simrs_profile.get('bpjs_card_no', '-')} ({simrs_profile.get('bpjs_class', '-')}) |")
             lines.append(f"| **Poliklinik Aktif** | {simrs_profile.get('active_clinic', '-')} |")
             lines.append(f"| **Dokter Penanggung Jawab (DPJP)** | {simrs_profile.get('attending_physician', '-')} |\n")
         else:
             lines.append("*Data profil dan demografi pasien tidak ditemukan di SIMRS.*\n")
             
-        # 2. Riwayat Penyakit Kronis & Alergi
-        lines.append("### 🩺 Riwayat Penyakit Kronis & Alergi Obat")
-        chronic = simrs_history.get("chronic_conditions") if simrs_history else None
-        allergies = simrs_history.get("documented_allergies") if simrs_history else None
-        
-        if chronic and len(chronic) > 0:
-            lines.append("**Penyakit Kronis Tercatat:**")
-            for c in chronic:
-                lines.append(f"- {c}")
-        else:
-            lines.append("**Penyakit Kronis:** *Data tidak ditemukan / Tidak ada riwayat penyakit kronis yang tercatat di SIMRS.*")
-            
-        if allergies and len(allergies) > 0:
-            lines.append("\n**Riwayat Alergi Obat:**")
-            for a in allergies:
-                lines.append(f"- ⚠️ {a}")
-        else:
-            lines.append("\n**Riwayat Alergi Obat:** *Data tidak ditemukan / Tidak ada riwayat alergi obat yang tercatat di SIMRS (NKDA).*")
-        lines.append("")
-        
-        # 3. Riwayat Rawat Inap
-        lines.append("### 🏥 Riwayat Rawat Inap Terdahulu")
-        admissions = simrs_history.get("past_admissions") if simrs_history else None
-        if admissions and len(admissions) > 0:
-            lines.append("| Tgl Masuk | Tgl Keluar | Diagnosis Admisi | Resume Pemulangan |")
-            lines.append("| :--- | :--- | :--- | :--- |")
-            for adm in admissions:
-                lines.append(f"| {adm.get('admission_date', '-')} | {adm.get('discharge_date', '-')} | {adm.get('diagnosis', '-')} | {adm.get('discharge_summary', '-')} |")
-        else:
-            lines.append("*Data tidak ditemukan / Tidak ada riwayat rawat inap terdahulu yang tercatat di SIMRS.*")
-        lines.append("")
-        
-        # 4. Hasil Laboratorium & Tanda Vital
-        lines.append("### 🧪 Hasil Pemeriksaan Laboratorium & Tanda Vital")
-        labs_data = None
-        if simrs_labs and simrs_labs.get("latest_labs"):
-            labs_data = simrs_labs.get("latest_labs")
-        elif simrs_history and simrs_history.get("historical_labs"):
-            labs_data = simrs_history.get("historical_labs")
-        elif ehr_data and ehr_data.get("recent_labs"):
-            labs_data = [{"test_name": k, "value": v, "unit": "", "ref_range": "-", "status": "Recorded"} for k, v in ehr_data.get("recent_labs").items()]
-            
-        if labs_data and len(labs_data) > 0:
-            lines.append("| Pemeriksaan | Hasil | Satuan | Nilai Rujukan | Status |")
-            lines.append("| :--- | :--- | :--- | :--- | :--- |")
-            for l in labs_data:
-                lines.append(f"| {l.get('test_name', l.get('lab', '-'))} | **{l.get('value', '-')}** | {l.get('unit', '-')} | {l.get('ref_range', '-')} | {l.get('status', 'Normal')} |")
-        else:
-            lines.append("*Data tidak ditemukan / Belum ada riwayat hasil laboratorium yang tercatat di SIMRS.*")
-        lines.append("")
-        
-        lines.append("> ⚠️ **Disclaimer Medis**: Informasi riwayat medis ini disajikan berdasarkan pangkalan data RME SIMRS untuk pendukung keputusan klinis (CDSS). Keputusan diagnostik dan intervensi klinis definitif tetap merupakan wewenang Dokter Penanggung Jawab Pasien (DPJP).")
+        lines.append("> ⚠️ **Disclaimer Medis**: Informasi demografi ini disajikan langsung dari pangkalan data RME SIMRS untuk verifikasi identitas pasien sebelum tindakan medis/konsultasi klinis.")
         
         return "\n".join(lines), None
 
@@ -218,7 +166,7 @@ def _generate_fallback_synthesis(
             greet_text = (
                 "Halo Dokter! 👋 Selamat datang di **AI Medical Assistant & Clinical Decision Support System**.\n\n"
                 "Saya siap membantu Anda dalam proses konsultasi dan evaluasi klinis pasien. Anda dapat memilih salah satu aksi pada **Quick Prompts / FAQ** di atas atau menanyakan langsung:\n\n"
-                "1. **📋 Ambil Informasi Riwayat Pasien (Demografi, Riwayat Kronis, Rawat Inap, Lab)**: Mengambil riwayat lengkap dari SIMRS.\n"
+                "1. **📋 Ambil Informasi Demografi Pasien**: Mengambil data profil demografi lengkap pasien dari SIMRS.\n"
                 "2. **📝 Ambil Data Anamnesis SIMRS**: Keluhan utama, RPS, RPD, RPK, dan tinjauan sistem.\n"
                 "3. **🧪 Evaluasi Hasil Lab & Pemeriksaan SIMRS**: Analisis serial HbA1c, eGFR, uACR, elektrolit, dan TTV.\n"
                 "4. **🎯 Rekomendasi Diagnosis & Kode ICD-10**: Rekomendasi diagnosis kerja, diagnosis banding, dan pencarian master ICD-10.\n"
@@ -516,12 +464,12 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
             prompt_context += (
                 f"=== SIMRS PATIENT DEMOGRAPHICS (VIA MCP) ===\n"
                 f"Status: Ditemukan di SIMRS\n"
-                f"MRN: {simrs_profile.get('mrn', '-')}\n"
                 f"Full Name: {simrs_profile.get('full_name', '-')}\n"
+                f"MRN: {simrs_profile.get('mrn', '-')}\n"
                 f"NIK: {simrs_profile.get('nik', '-')}\n"
-                f"BPJS No: {simrs_profile.get('bpjs_card_no', '-')} ({simrs_profile.get('bpjs_class', '-')})\n"
                 f"Age/Sex: {simrs_profile.get('age', '-')} y/o {simrs_profile.get('gender', '-')}\n"
                 f"Blood Type: {simrs_profile.get('blood_type', '-')}\n"
+                f"BPJS No: {simrs_profile.get('bpjs_card_no', '-')} ({simrs_profile.get('bpjs_class', '-')})\n"
                 f"Clinic: {simrs_profile.get('active_clinic', '-')}\n"
                 f"Physician (DPJP): {simrs_profile.get('attending_physician', '-')}\n\n"
             )
@@ -531,71 +479,15 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
                 f"Status: Data profil demografi pasien TIDAK DITEMUKAN di SIMRS.\n\n"
             )
 
-        if simrs_history:
-            chronic = simrs_history.get('chronic_conditions')
-            allergies = simrs_history.get('documented_allergies')
-            admissions = simrs_history.get('past_admissions')
-            soap_note = simrs_history.get("last_soap_progress_note")
-
-            prompt_context += (
-                f"=== SIMRS MEDICAL HISTORY & CHRONIC CONDITIONS ===\n"
-                f"Status: Ditemukan di SIMRS\n"
-                f"Chronic Conditions: {', '.join(chronic) if chronic else 'Data tidak ditemukan / Tidak ada riwayat penyakit kronis yang tercatat di SIMRS'}\n"
-                f"Documented Allergies: {', '.join(allergies) if allergies else 'Data tidak ditemukan / Tidak ada riwayat alergi obat yang tercatat di SIMRS (NKDA)'}\n"
-                f"Past Admissions: {admissions if admissions else 'Data tidak ditemukan / Tidak ada riwayat rawat inap terdahulu yang tercatat di SIMRS'}\n\n"
-            )
-            if soap_note:
-                prompt_context += (
-                    f"=== LATEST SIMRS CPPT / SOAP PROGRESS NOTE ===\n"
-                    f"Date/Time: {soap_note.get('note_date', '-')}\n"
-                    f"DPJP: {soap_note.get('practitioner', '-')} ({soap_note.get('clinic', '-')})\n"
-                    f"Subjective (S): {soap_note.get('subjective', '-')}\n"
-                    f"Objective (O): {soap_note.get('objective', '-')}\n"
-                    f"Assessment (A): {soap_note.get('assessment', '-')}\n"
-                    f"Plan (P): {soap_note.get('plan', '-')}\n\n"
-                )
-        else:
-            prompt_context += (
-                f"=== SIMRS MEDICAL HISTORY & CHRONIC CONDITIONS ===\n"
-                f"Status: Data riwayat medis, penyakit kronis, dan rawat inap pasien TIDAK DITEMUKAN di SIMRS.\n\n"
-            )
-
-        if simrs_labs:
-            latest_labs = simrs_labs.get("latest_labs", [])
-            v_signs = simrs_labs.get("vital_signs", {})
-            prompt_context += (
-                f"=== SIMRS LABORATORY & VITAL SIGNS EVALUATION ===\n"
-                f"Status: Ditemukan di SIMRS\n"
-                f"Vital Signs: {v_signs if v_signs else 'Data tidak ditemukan'}\n"
-                f"Latest Labs: {latest_labs if latest_labs else 'Data tidak ditemukan / Belum ada riwayat hasil laboratorium yang tercatat di SIMRS'}\n\n"
-            )
-        elif ehr_data and ehr_data.get("recent_labs"):
-            prompt_context += (
-                f"=== SIMRS LABORATORY & VITAL SIGNS EVALUATION ===\n"
-                f"Status: Ditemukan di Rekam Medis Pasien\n"
-                f"Vital Signs: {ehr_data.get('vitals', {})}\n"
-                f"Recent Labs: {ehr_data.get('recent_labs', {})}\n\n"
-            )
-        else:
-            prompt_context += (
-                f"=== SIMRS LABORATORY & VITAL SIGNS EVALUATION ===\n"
-                f"Status: Data pemeriksaan laboratorium dan tanda vital TIDAK DITEMUKAN di SIMRS.\n\n"
-            )
-
         system_instruction = (
-            "Anda adalah Asisten AI Medis Klinis (Medical Co-Pilot) profesional yang terintegrasi dengan SIMRS melalui Model Context Protocol (MCP). "
+            "Anda adalah Asisten AI Medis Klinis (Medical Co-Pilot) profesional yang terintegrasi dengan SIMRS melalui Model Context Protocol (MCP).\n"
             "PENTING & INSTRUKSI GROUNDING KETAT:\n"
-            "1. Dokter meminta Informasi Riwayat Pasien (Profil Demografi, Riwayat Penyakit Kronis, Riwayat Rawat Inap, Catatan Alergi, dan Hasil Laboratorium/Pemeriksaan).\n"
-            "2. ATURAN ANTI-HALUSINASI MUTLAK: Sajikan informasi HANYA berdasarkan data yang tersedia di SIMRS pada konteks di atas. "
-            "Jika data tertentu (misalnya profil demografi, riwayat penyakit kronis, riwayat rawat inap, riwayat alergi, catatan SOAP, atau hasil lab) tidak ada / kosong / berstatus 'TIDAK DITEMUKAN', sampaikan apa adanya secara eksplisit dan jujur, misalnya: 'Data tidak ditemukan / Tidak ada riwayat penyakit kronis yang tercatat di SIMRS'. "
-            "DILARANG KERAS mengarang, berhalusinasi, atau memalsukan data pasien, penyakit, rawat inap, atau hasil lab.\n"
+            "1. Dokter meminta Informasi Demografi Pasien (Nama, MRN, NIK, Usia/Gender, Golongan Darah, BPJS, Poliklinik, DPJP).\n"
+            "2. ATURAN ANTI-HALUSINASI MUTLAK: Sajikan HANYA data demografi yang tercantum di atas. Jangan mengarang data atau menampilkan tabel hasil lab / rawat inap jika tidak diminta.\n"
             "3. Format sajian menggunakan Markdown terstruktur dan tabel rapi:\n"
-            "   - Judul: `## 📋 Informasi Riwayat Medis & Demografi Pasien (SIMRS MCP)`\n"
-            "   - **Profil & Demografi Pasien** (Tabel: Nama, MRN, NIK, Usia/Gender, BPJS, Poliklinik/DPJP)\n"
-            "   - **Riwayat Penyakit Kronis & Alergi Obat** (Sebutkan penyakit kronis dan alergi, atau nyatakan 'Data tidak ditemukan' jika tidak ada)\n"
-            "   - **Riwayat Rawat Inap Terdahulu** (Tabel admisi atau nyatakan 'Data tidak ditemukan / Tidak ada riwayat rawat inap terdahulu yang tercatat di SIMRS')\n"
-            "   - **Hasil Laboratorium & Tanda Vital Pasien** (Tabel lab dan tanda vital, atau nyatakan 'Data tidak ditemukan' jika belum ada pemeriksaan lab)\n"
-            "   - Catatan ringkas tindak lanjut klinis dan disclaimer medis resmi."
+            "   - Judul: `## 📋 Informasi Profil & Demografi Pasien (SIMRS MCP)`\n"
+            "   - Tabel Parameter Demografi (Nama Pasien, No. Rekam Medis (MRN), NIK, Usia / Gender, Golongan Darah, Status Jaminan (BPJS), Poliklinik Aktif, DPJP)\n"
+            "   - Disclaimer singkat di akhir."
         )
 
     else:
