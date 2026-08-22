@@ -432,13 +432,13 @@ def node_planner(state: MedicalAgentState) -> MedicalAgentState:
 
     # KONSULTASI PASIEN SPESIFIK (Terhubung dengan SIMRS)
     if any(k in query_lower for k in ["buat cppt", "kirim cppt", "kirim soap", "buat soap", "sinkronisasi cppt", "simpan cppt", "kirim/sinkronisasikan", "update simrs", "sync simrs", "commit emr", "kirim ke simrs", "kirim/sinkronisasi"]):
-        detected_intent = "9. Buat & Kirim CPPT S/O/A/P ke SIMRS (MCP)"
-    elif any(k in query_lower for k in ["catatan perkembangan", "riwayat catatan", "s/o/a/p", "soap terakhir", "perkembangan medis", "progress note", "cppt"]):
-        detected_intent = "1. Riwayat Catatan Perkembangan Pasien (SIMRS MCP)"
+        detected_intent = "10. Buat & Kirim CPPT S/O/A/P ke SIMRS (MCP)"
+    elif any(k in query_lower for k in ["ambil informasi riwayat", "ambil data profil", "profil demografi", "riwayat penyakit kronis", "rawat inap", "riwayat pasien", "informasi riwayat", "catatan perkembangan", "riwayat catatan", "s/o/a/p", "soap terakhir", "progress note", "admission"]):
+        detected_intent = "1. Ambil Informasi Riwayat Pasien (SIMRS MCP)"
     elif any(k in query_lower for k in ["anamnesis", "keluhan", "rps", "rpd", "rpk", "tinjauan sistem"]):
         detected_intent = "2. Ambil Data Anamnesis SIMRS (MCP)"
-    elif any(k in query_lower for k in ["riwayat", "demografi", "rawat inap", "admission"]):
-        detected_intent = "1. Riwayat & Demografi Pasien SIMRS (MCP)"
+    elif any(k in query_lower for k in ["riwayat", "demografi"]):
+        detected_intent = "1. Ambil Informasi Riwayat Pasien (SIMRS MCP)"
     elif any(k in query_lower for k in ["lab", "laboratorium", "ttv", "tanda vital", "egfr", "uacr", "hba1c", "elektrolit", "tensi"]):
         detected_intent = "3. Evaluasi Hasil Lab & Pemeriksaan SIMRS (MCP)"
     elif any(k in query_lower for k in ["diagnosis", "icd", "banding", "differential"]):
@@ -519,6 +519,13 @@ def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
                 "status": "success",
                 "result": f"Nama: {simrs_profile['full_name']} | NIK: {simrs_profile['nik']} | BPJS: {simrs_profile['bpjs_card_no']} ({simrs_profile['bpjs_class']})"
             })
+        else:
+            steps.append({
+                "step_name": "Ambil Profil & Demografi Pasien SIMRS (MCP)",
+                "description": f"Mencari profil pasien di SIMRS ({simrs_mrn})",
+                "status": "info",
+                "result": f"Data profil demografi untuk {simrs_mrn} tidak ditemukan di SIMRS."
+            })
             
         # Step 2B: Query SIMRS Chronic Conditions, Past Admissions & SOAP Notes via MCP
         simrs_hist_res = tool_simrs_get_patient_history(simrs_mrn)
@@ -526,14 +533,21 @@ def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
             simrs_history = simrs_hist_res["history"]
             soap_note = simrs_history.get("last_soap_progress_note", {})
             steps.append({
-                "step_name": "1. Riwayat Catatan Perkembangan Pasien (SIMRS MCP)",
-                "description": f"Mengambil riwayat penyakit kronis, riwayat rawat inap, catatan alergi, dan catatan perkembangan medis S/O/A/P terakhir dari basis data SIMRS",
+                "step_name": "1. Ambil Informasi Riwayat Pasien (SIMRS MCP)",
+                "description": f"Mengambil riwayat penyakit kronis, riwayat rawat inap, catatan alergi, dan riwayat klinis dari basis data SIMRS",
                 "status": "success",
                 "result": {
                     "penyakit_kronis": simrs_history.get("chronic_conditions", []),
                     "riwayat_rawat_inap": simrs_history.get("past_admissions", []),
                     "catatan_perkembangan_soap": soap_note
                 }
+            })
+        else:
+            steps.append({
+                "step_name": "1. Ambil Informasi Riwayat Pasien (SIMRS MCP)",
+                "description": f"Mencari riwayat penyakit kronis dan rawat inap di SIMRS ({simrs_mrn})",
+                "status": "info",
+                "result": f"Data riwayat penyakit kronis & rawat inap untuk {simrs_mrn} tidak ditemukan di SIMRS."
             })
 
         # Step 2C: Query Local EHR Database (Diagnoses, Allergies, Medications, Labs)
@@ -563,6 +577,7 @@ def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
 
     prof_name = simrs_profile.get('full_name') if simrs_profile else (ehr_result.get('name') if ehr_result else "N/A (Konsultasi Umum)")
     _debug_node_end("fetch_patient_history", f"Patient: {prof_name} | Chronic conditions: {len(simrs_history.get('chronic_conditions', []) if simrs_history else [])}")
+
     _debug_edge("fetch_patient_history", "fetch_patient_anamnesis")
     return {
         **state,
@@ -945,14 +960,14 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
 
     is_general_full_eval = not is_general_knowledge_query and any(phrase in query_lower for phrase in ["evaluasi lengkap", "laporan lengkap", "semua data", "evaluasi klinis terpadu", "ringkasan lengkap", "konsultasi lengkap", "seluruh pemeriksaan"])
     is_cppt_commit = any(k in query_lower for k in ["buat cppt", "kirim cppt", "kirim soap", "buat soap", "sinkronisasi cppt", "simpan cppt", "kirim/sinkronisasikan", "update simrs", "sync simrs", "commit emr", "kirim ke simrs", "kirim/sinkronisasi"])
-    is_progress_note_only = not is_general_full_eval and not is_cppt_commit and not is_general_knowledge_query and any(k in query_lower for k in ["catatan perkembangan", "riwayat catatan", "s/o/a/p", "soap", "perkembangan medis", "progress note", "cppt"])
-    is_anamnesis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["anamnesis", "keluhan", "rps", "rpd", "rpk"]) and not is_progress_note_only and not is_cppt_commit
-    is_labs_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["lab", "laboratorium", "ttv", "tanda vital", "egfr", "uacr", "evaluasi hasil lab", "pemeriksaan simrs"]) and not is_progress_note_only and not is_anamnesis_only and not is_cppt_commit
-    is_diagnosis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["diagnosis kerja", "diagnosis banding", "rekomendasi diagnosis pasien", "diagnosis pasien"]) and not is_labs_only and not is_anamnesis_only and not is_progress_note_only and not is_cppt_commit
-    is_procedure_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["rekomendasi tindakan", "prosedur medis", "rencana tindakan", "tindakan medis", "intervensi klinis", "tindakan", "prosedur"]) and not is_diagnosis_only and not is_labs_only and not is_anamnesis_only and not is_progress_note_only and not is_cppt_commit
+    is_patient_history_only = not is_general_full_eval and not is_cppt_commit and not is_general_knowledge_query and any(k in query_lower for k in ["ambil informasi riwayat", "ambil data profil", "profil demografi", "riwayat penyakit kronis", "rawat inap", "riwayat pasien", "informasi riwayat", "catatan perkembangan", "riwayat catatan", "s/o/a/p", "soap terakhir", "progress note", "riwayat dan demografi", "demografi pasien"])
+    is_anamnesis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["anamnesis", "keluhan", "rps", "rpd", "rpk"]) and not is_patient_history_only and not is_cppt_commit
+    is_labs_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["lab", "laboratorium", "ttv", "tanda vital", "egfr", "uacr", "evaluasi hasil lab", "pemeriksaan simrs"]) and not is_patient_history_only and not is_anamnesis_only and not is_cppt_commit
+    is_diagnosis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["diagnosis kerja", "diagnosis banding", "rekomendasi diagnosis pasien", "diagnosis pasien"]) and not is_labs_only and not is_anamnesis_only and not is_patient_history_only and not is_cppt_commit
+    is_procedure_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["rekomendasi tindakan", "prosedur medis", "rencana tindakan", "tindakan medis", "intervensi klinis", "tindakan", "prosedur"]) and not is_diagnosis_only and not is_labs_only and not is_anamnesis_only and not is_patient_history_only and not is_cppt_commit
 
     has_patient_data = bool(simrs_profile or simrs_anamnesis or simrs_labs or ehr_data)
-    is_patient_data_request = (is_progress_note_only or is_anamnesis_only or is_labs_only or is_diagnosis_only or is_procedure_only or is_general_full_eval or is_cppt_commit)
+    is_patient_data_request = (is_patient_history_only or is_anamnesis_only or is_labs_only or is_diagnosis_only or is_procedure_only or is_general_full_eval or is_cppt_commit)
 
     if detected_intent is None and not is_general_knowledge_query:
         prompt_context = f"Doctor Query: {query}\n"
@@ -960,7 +975,7 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
             "Anda adalah Asisten AI Medis Klinis (Medical Co-Pilot) yang santun, profesional, dan ramah. "
             "Pesan dokter tidak mengandung kueri rekam medis spesifik atau kueri workflow khusus (misal: salam, sapaan, atau percakapan umum). "
             "Tanggapi dengan ramah dan sopan dalam Bahasa Indonesia, tanyakan bagaimana Anda dapat membantu dokter, dan jelaskan secara ringkas fitur layanan klinis yang siap digunakan:\n"
-            "1. **📋 Ambil Informasi Riwayat Pasien (CPPT / S-O-A-P)**\n"
+            "1. **📋 Ambil Informasi Riwayat Pasien (Demografi, Riwayat Kronis, Rawat Inap, Lab)**\n"
             "2. **📝 Ambil Data Anamnesis SIMRS**\n"
             "3. **🧪 Evaluasi Hasil Lab & Tanda Vital Serial**\n"
             "4. **🎯 Rekomendasi Diagnosis & Kodefikasi ICD-10**\n"
@@ -1049,41 +1064,94 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
             "   - **Plan (P)**: Terapi farmakologi (nama obat, dosis nefroprotektif), rencana monitoring lab lanjutan, dan edukasi pasien\n"
             "4. Catatan konfirmasi bahwa data telah tersimpan permanen di basis data RME SIMRS dan disclaimer medis singkat."
         )
-    elif is_progress_note_only:
+    elif is_patient_history_only:
         prompt_context = f"Doctor Query: {query}\n\n"
         if simrs_profile:
             prompt_context += (
                 f"=== SIMRS PATIENT DEMOGRAPHICS (VIA MCP) ===\n"
-                f"MRN: {simrs_profile['mrn']} | Full Name: {simrs_profile['full_name']}\n"
-                f"NIK: {simrs_profile['nik']} | BPJS No: {simrs_profile['bpjs_card_no']} ({simrs_profile['bpjs_class']})\n"
-                f"Age/Sex: {simrs_profile['age']} y/o {simrs_profile['gender']} | Blood Type: {simrs_profile['blood_type']}\n"
-                f"Clinic: {simrs_profile['active_clinic']} | Physician: {simrs_profile['attending_physician']}\n\n"
+                f"Status: Ditemukan di SIMRS\n"
+                f"MRN: {simrs_profile.get('mrn', '-')}\n"
+                f"Full Name: {simrs_profile.get('full_name', '-')}\n"
+                f"NIK: {simrs_profile.get('nik', '-')}\n"
+                f"BPJS No: {simrs_profile.get('bpjs_card_no', '-')} ({simrs_profile.get('bpjs_class', '-')})\n"
+                f"Age/Sex: {simrs_profile.get('age', '-')} y/o {simrs_profile.get('gender', '-')}\n"
+                f"Blood Type: {simrs_profile.get('blood_type', '-')}\n"
+                f"Clinic: {simrs_profile.get('active_clinic', '-')}\n"
+                f"Physician (DPJP): {simrs_profile.get('attending_physician', '-')}\n\n"
             )
+        else:
+            prompt_context += (
+                f"=== SIMRS PATIENT DEMOGRAPHICS (VIA MCP) ===\n"
+                f"Status: Data profil demografi pasien TIDAK DITEMUKAN di SIMRS.\n\n"
+            )
+
         if simrs_history:
-            soap_note = simrs_history.get("last_soap_progress_note", {})
+            chronic = simrs_history.get('chronic_conditions')
+            allergies = simrs_history.get('documented_allergies')
+            admissions = simrs_history.get('past_admissions')
+            soap_note = simrs_history.get("last_soap_progress_note")
+
             prompt_context += (
                 f"=== SIMRS MEDICAL HISTORY & CHRONIC CONDITIONS ===\n"
-                f"Chronic Conditions: {', '.join(simrs_history.get('chronic_conditions', []))}\n"
-                f"Documented Allergies: {', '.join(simrs_history.get('documented_allergies', []))}\n"
-                f"Past Admissions: {simrs_history.get('past_admissions')}\n\n"
-                f"=== LATEST SIMRS CPPT / SOAP PROGRESS NOTE ===\n"
-                f"Date/Time: {soap_note.get('note_date')} | DPJP: {soap_note.get('practitioner')} ({soap_note.get('clinic')})\n"
-                f"Subjective (S): {soap_note.get('subjective')}\n"
-                f"Objective (O): {soap_note.get('objective')}\n"
-                f"Assessment (A): {soap_note.get('assessment')}\n"
-                f"Plan (P): {soap_note.get('plan')}\n\n"
+                f"Status: Ditemukan di SIMRS\n"
+                f"Chronic Conditions: {', '.join(chronic) if chronic else 'Data tidak ditemukan / Tidak ada riwayat penyakit kronis yang tercatat di SIMRS'}\n"
+                f"Documented Allergies: {', '.join(allergies) if allergies else 'Data tidak ditemukan / Tidak ada riwayat alergi obat yang tercatat di SIMRS (NKDA)'}\n"
+                f"Past Admissions: {admissions if admissions else 'Data tidak ditemukan / Tidak ada riwayat rawat inap terdahulu yang tercatat di SIMRS'}\n\n"
             )
+            if soap_note:
+                prompt_context += (
+                    f"=== LATEST SIMRS CPPT / SOAP PROGRESS NOTE ===\n"
+                    f"Date/Time: {soap_note.get('note_date', '-')}\n"
+                    f"DPJP: {soap_note.get('practitioner', '-')} ({soap_note.get('clinic', '-')})\n"
+                    f"Subjective (S): {soap_note.get('subjective', '-')}\n"
+                    f"Objective (O): {soap_note.get('objective', '-')}\n"
+                    f"Assessment (A): {soap_note.get('assessment', '-')}\n"
+                    f"Plan (P): {soap_note.get('plan', '-')}\n\n"
+                )
+        else:
+            prompt_context += (
+                f"=== SIMRS MEDICAL HISTORY & CHRONIC CONDITIONS ===\n"
+                f"Status: Data riwayat medis, penyakit kronis, dan rawat inap pasien TIDAK DITEMUKAN di SIMRS.\n\n"
+            )
+
+        if simrs_labs:
+            latest_labs = simrs_labs.get("latest_labs", [])
+            v_signs = simrs_labs.get("vital_signs", {})
+            prompt_context += (
+                f"=== SIMRS LABORATORY & VITAL SIGNS EVALUATION ===\n"
+                f"Status: Ditemukan di SIMRS\n"
+                f"Vital Signs: {v_signs if v_signs else 'Data tidak ditemukan'}\n"
+                f"Latest Labs: {latest_labs if latest_labs else 'Data tidak ditemukan / Belum ada riwayat hasil laboratorium yang tercatat di SIMRS'}\n\n"
+            )
+        elif ehr_data and ehr_data.get("recent_labs"):
+            prompt_context += (
+                f"=== SIMRS LABORATORY & VITAL SIGNS EVALUATION ===\n"
+                f"Status: Ditemukan di Rekam Medis Pasien\n"
+                f"Vital Signs: {ehr_data.get('vitals', {})}\n"
+                f"Recent Labs: {ehr_data.get('recent_labs', {})}\n\n"
+            )
+        else:
+            prompt_context += (
+                f"=== SIMRS LABORATORY & VITAL SIGNS EVALUATION ===\n"
+                f"Status: Data pemeriksaan laboratorium dan tanda vital TIDAK DITEMUKAN di SIMRS.\n\n"
+            )
+
         system_instruction = (
             "Anda adalah Asisten AI Medis Klinis (Medical Co-Pilot) profesional yang terintegrasi dengan SIMRS melalui Model Context Protocol (MCP). "
-            "PENTING: Dokter secara spesifik HANYA meminta data Riwayat Demografi Pasien, Riwayat Penyakit Kronis, Riwayat Rawat Inap, dan Catatan Perkembangan Medis (CPPT / S-O-A-P) terakhir pasien. "
-            "Sajikan HANYA data riwayat dan catatan perkembangan SOAP pasien secara terstruktur, rapi, dan lengkap menggunakan TABEL MARKDOWN: "
-            "1. Judul: `## 📋 Riwayat Catatan Perkembangan Pasien Terpadu (SIMRS MCP)`\n"
-            "2. Tabel Profil & Demografi Pasien (Nama, MRN, NIK, BPJS, Usia, Poliklinik/DPJP)\n"
-            "3. Tabel Riwayat Penyakit Kronis & Rawat Inap Terdahulu\n"
-            "4. Tabel Catatan Perkembangan Pasien Terintegrasi (CPPT / S-O-A-P Terakhir) lengkap dengan Waktu Pemeriksaan, DPJP, Poliklinik, S, O, A, P.\n"
-            "5. Catatan ringkas tindak lanjut klinis dan disclaimer medis di bagian akhir.\n"
-            "JANGAN PERNAH menampilkan tabel evaluasi lab, rekomendasi diagnosis baru, red flags, atau rekomendasi obat baru karena dokter hanya meminta riwayat dan catatan perkembangan SOAP pasien."
+            "PENTING & INSTRUKSI GROUNDING KETAT:\n"
+            "1. Dokter meminta Informasi Riwayat Pasien (Profil Demografi, Riwayat Penyakit Kronis, Riwayat Rawat Inap, Catatan Alergi, dan Hasil Laboratorium/Pemeriksaan).\n"
+            "2. ATURAN ANTI-HALUSINASI MUTLAK: Sajikan informasi HANYA berdasarkan data yang tersedia di SIMRS pada konteks di atas. "
+            "Jika data tertentu (misalnya profil demografi, riwayat penyakit kronis, riwayat rawat inap, riwayat alergi, catatan SOAP, atau hasil lab) tidak ada / kosong / berstatus 'TIDAK DITEMUKAN', sampaikan apa adanya secara eksplisit dan jujur, misalnya: 'Data tidak ditemukan / Tidak ada riwayat penyakit kronis yang tercatat di SIMRS'. "
+            "DILARANG KERAS mengarang, berhalusinasi, atau memalsukan data pasien, penyakit, rawat inap, atau hasil lab.\n"
+            "3. Format sajian menggunakan Markdown terstruktur dan tabel rapi:\n"
+            "   - Judul: `## 📋 Informasi Riwayat Medis & Demografi Pasien (SIMRS MCP)`\n"
+            "   - **Profil & Demografi Pasien** (Tabel: Nama, MRN, NIK, Usia/Gender, BPJS, Poliklinik/DPJP)\n"
+            "   - **Riwayat Penyakit Kronis & Alergi Obat** (Sebutkan penyakit kronis dan alergi, atau nyatakan 'Data tidak ditemukan' jika tidak ada)\n"
+            "   - **Riwayat Rawat Inap Terdahulu** (Tabel admisi atau nyatakan 'Data tidak ditemukan / Tidak ada riwayat rawat inap terdahulu yang tercatat di SIMRS')\n"
+            "   - **Hasil Laboratorium & Tanda Vital Pasien** (Tabel lab dan tanda vital, atau nyatakan 'Data tidak ditemukan' jika belum ada pemeriksaan lab)\n"
+            "   - Catatan ringkas tindak lanjut klinis dan disclaimer medis resmi."
         )
+
     elif is_anamnesis_only:
         prompt_context = f"Doctor Query: {query}\n\n"
         if simrs_profile:
@@ -1477,12 +1545,12 @@ def _generate_fallback_synthesis(
 
     is_general_full_eval = not is_general_knowledge_query and any(phrase in query_lower for phrase in ["evaluasi lengkap", "laporan lengkap", "semua data", "evaluasi klinis terpadu", "ringkasan lengkap", "konsultasi lengkap", "seluruh pemeriksaan"])
     is_cppt_commit = any(k in query_lower for k in ["buat cppt", "kirim cppt", "kirim soap", "buat soap", "sinkronisasi cppt", "simpan cppt", "kirim/sinkronisasikan", "update simrs", "sync simrs", "commit emr", "kirim ke simrs", "kirim/sinkronisasi"])
-    is_progress_note_only = not is_general_full_eval and not is_cppt_commit and not is_general_knowledge_query and any(k in query_lower for k in ["catatan perkembangan", "riwayat catatan", "s/o/a/p", "soap", "perkembangan medis", "progress note", "cppt"])
-    is_anamnesis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["anamnesis", "keluhan", "rps", "rpd", "rpk"]) and not is_progress_note_only and not is_cppt_commit
-    is_labs_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["lab", "laboratorium", "ttv", "tanda vital", "egfr", "uacr", "evaluasi hasil lab", "pemeriksaan simrs"]) and not is_progress_note_only and not is_anamnesis_only and not is_cppt_commit
-    is_diagnosis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["diagnosis kerja", "diagnosis banding", "rekomendasi diagnosis pasien", "diagnosis pasien"]) and not is_labs_only and not is_anamnesis_only and not is_progress_note_only and not is_cppt_commit
+    is_patient_history_only = not is_general_full_eval and not is_cppt_commit and not is_general_knowledge_query and any(k in query_lower for k in ["ambil informasi riwayat", "ambil data profil", "profil demografi", "riwayat penyakit kronis", "rawat inap", "riwayat pasien", "informasi riwayat", "catatan perkembangan", "riwayat catatan", "s/o/a/p", "soap terakhir", "progress note", "riwayat dan demografi", "demografi pasien"])
+    is_anamnesis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["anamnesis", "keluhan", "rps", "rpd", "rpk"]) and not is_patient_history_only and not is_cppt_commit
+    is_labs_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["lab", "laboratorium", "ttv", "tanda vital", "egfr", "uacr", "evaluasi hasil lab", "pemeriksaan simrs"]) and not is_patient_history_only and not is_anamnesis_only and not is_cppt_commit
+    is_diagnosis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["diagnosis kerja", "diagnosis banding", "rekomendasi diagnosis pasien", "diagnosis pasien"]) and not is_labs_only and not is_anamnesis_only and not is_patient_history_only and not is_cppt_commit
     has_patient_data = bool(simrs_profile or simrs_anamnesis or simrs_labs or ehr_data)
-    is_patient_data_request = (is_progress_note_only or is_anamnesis_only or is_labs_only or is_diagnosis_only or is_general_full_eval or is_cppt_commit)
+    is_patient_data_request = (is_patient_history_only or is_anamnesis_only or is_labs_only or is_diagnosis_only or is_general_full_eval or is_cppt_commit)
 
     if not has_patient_data and is_patient_data_request:
         no_patient_text = (
@@ -1534,13 +1602,88 @@ def _generate_fallback_synthesis(
         )
         return report_schema.to_markdown(), report_schema.model_dump()
 
-    if not any([is_progress_note_only, is_anamnesis_only, is_labs_only, is_diagnosis_only, is_general_full_eval, is_cppt_commit, is_general_knowledge_query]):
+    if is_patient_history_only:
+        lines = []
+        lines.append("## 📋 Informasi Riwayat Medis & Demografi Pasien (SIMRS MCP)\n")
+        
+        # 1. Profil & Demografi
+        lines.append("### 👤 Profil & Demografi Pasien")
+        if simrs_profile:
+            lines.append("| Parameter | Keterangan |")
+            lines.append("| :--- | :--- |")
+            lines.append(f"| **Nama Pasien** | {simrs_profile.get('full_name', '-')} |")
+            lines.append(f"| **No. Rekam Medis (MRN)** | `{simrs_profile.get('mrn', '-')}` |")
+            lines.append(f"| **NIK** | {simrs_profile.get('nik', '-')} |")
+            lines.append(f"| **Usia / Gender** | {simrs_profile.get('age', '-')} tahun / {simrs_profile.get('gender', '-')} |")
+            lines.append(f"| **Status Jaminan (BPJS)** | {simrs_profile.get('bpjs_card_no', '-')} ({simrs_profile.get('bpjs_class', '-')}) |")
+            lines.append(f"| **Golongan Darah** | {simrs_profile.get('blood_type', '-')} |")
+            lines.append(f"| **Poliklinik Aktif** | {simrs_profile.get('active_clinic', '-')} |")
+            lines.append(f"| **Dokter Penanggung Jawab (DPJP)** | {simrs_profile.get('attending_physician', '-')} |\n")
+        else:
+            lines.append("*Data profil dan demografi pasien tidak ditemukan di SIMRS.*\n")
+            
+        # 2. Riwayat Penyakit Kronis & Alergi
+        lines.append("### 🩺 Riwayat Penyakit Kronis & Alergi Obat")
+        chronic = simrs_history.get("chronic_conditions") if simrs_history else None
+        allergies = simrs_history.get("documented_allergies") if simrs_history else None
+        
+        if chronic and len(chronic) > 0:
+            lines.append("**Penyakit Kronis Tercatat:**")
+            for c in chronic:
+                lines.append(f"- {c}")
+        else:
+            lines.append("**Penyakit Kronis:** *Data tidak ditemukan / Tidak ada riwayat penyakit kronis yang tercatat di SIMRS.*")
+            
+        if allergies and len(allergies) > 0:
+            lines.append("\n**Riwayat Alergi Obat:**")
+            for a in allergies:
+                lines.append(f"- ⚠️ {a}")
+        else:
+            lines.append("\n**Riwayat Alergi Obat:** *Data tidak ditemukan / Tidak ada riwayat alergi obat yang tercatat di SIMRS (NKDA).*")
+        lines.append("")
+        
+        # 3. Riwayat Rawat Inap
+        lines.append("### 🏥 Riwayat Rawat Inap Terdahulu")
+        admissions = simrs_history.get("past_admissions") if simrs_history else None
+        if admissions and len(admissions) > 0:
+            lines.append("| Tgl Masuk | Tgl Keluar | Diagnosis Admisi | Resume Pemulangan |")
+            lines.append("| :--- | :--- | :--- | :--- |")
+            for adm in admissions:
+                lines.append(f"| {adm.get('admission_date', '-')} | {adm.get('discharge_date', '-')} | {adm.get('diagnosis', '-')} | {adm.get('discharge_summary', '-')} |")
+        else:
+            lines.append("*Data tidak ditemukan / Tidak ada riwayat rawat inap terdahulu yang tercatat di SIMRS.*")
+        lines.append("")
+        
+        # 4. Hasil Laboratorium & Tanda Vital
+        lines.append("### 🧪 Hasil Pemeriksaan Laboratorium & Tanda Vital")
+        labs_data = None
+        if simrs_labs and simrs_labs.get("latest_labs"):
+            labs_data = simrs_labs.get("latest_labs")
+        elif simrs_history and simrs_history.get("historical_labs"):
+            labs_data = simrs_history.get("historical_labs")
+        elif ehr_data and ehr_data.get("recent_labs"):
+            labs_data = [{"test_name": k, "value": v, "unit": "", "ref_range": "-", "status": "Recorded"} for k, v in ehr_data.get("recent_labs").items()]
+            
+        if labs_data and len(labs_data) > 0:
+            lines.append("| Pemeriksaan | Hasil | Satuan | Nilai Rujukan | Status |")
+            lines.append("| :--- | :--- | :--- | :--- | :--- |")
+            for l in labs_data:
+                lines.append(f"| {l.get('test_name', l.get('lab', '-'))} | **{l.get('value', '-')}** | {l.get('unit', '-')} | {l.get('ref_range', '-')} | {l.get('status', 'Normal')} |")
+        else:
+            lines.append("*Data tidak ditemukan / Belum ada riwayat hasil laboratorium yang tercatat di SIMRS.*")
+        lines.append("")
+        
+        lines.append("> ⚠️ **Disclaimer Medis**: Informasi riwayat medis ini disajikan berdasarkan pangkalan data RME SIMRS untuk pendukung keputusan klinis (CDSS). Keputusan diagnostik dan intervensi klinis definitif tetap merupakan wewenang Dokter Penanggung Jawab Pasien (DPJP).")
+        
+        return "\n".join(lines), None
+
+    if not any([is_patient_history_only, is_anamnesis_only, is_labs_only, is_diagnosis_only, is_general_full_eval, is_cppt_commit, is_general_knowledge_query]):
         query_strip = query_lower.strip()
         if any(g in query_strip for g in ["halo", "hai", "selamat", "pagi", "siang", "sore", "malam", "assalam", "hi", "tes", "test", "bantu", "siapa"]):
             greet_text = (
                 "Halo Dokter! 👋 Selamat datang di **AI Medical Assistant & Clinical Decision Support System**.\n\n"
                 "Saya siap membantu Anda dalam proses konsultasi dan evaluasi klinis pasien. Anda dapat memilih salah satu aksi pada **Quick Prompts / FAQ** di atas atau menanyakan langsung:\n\n"
-                "1. **📋 Ambil Informasi Riwayat Pasien (CPPT / S-O-A-P)**: Mengambil riwayat CPPT S/O/A/P dan rawat inap.\n"
+                "1. **📋 Ambil Informasi Riwayat Pasien (Demografi, Riwayat Kronis, Rawat Inap, Lab)**: Mengambil riwayat lengkap dari SIMRS.\n"
                 "2. **📝 Ambil Data Anamnesis SIMRS**: Keluhan utama, RPS, RPD, RPK, dan tinjauan sistem.\n"
                 "3. **🧪 Evaluasi Hasil Lab & Pemeriksaan SIMRS**: Analisis serial HbA1c, eGFR, uACR, elektrolit, dan TTV.\n"
                 "4. **🎯 Rekomendasi Diagnosis & Kode ICD-10**: Rekomendasi diagnosis kerja, diagnosis banding, dan pencarian master ICD-10.\n"
