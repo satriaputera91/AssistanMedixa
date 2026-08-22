@@ -22,7 +22,10 @@ export interface AgentChatResponse {
   workflow_type?: 'text' | 'audio';
   audio_transcript?: string | null;
   soa_note?: SOANote | null;
+  structured_output?: Record<string, any> | null;
+  output_validation?: Record<string, any> | null;
 }
+
 
 export interface SOAContent {
   subjective: string;

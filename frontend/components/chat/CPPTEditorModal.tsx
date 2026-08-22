@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import type { PatientRecord } from '@/services/agent.service';
+import { AgentService, type PatientRecord } from '@/services/agent.service';
 import { ICD10_DATABASE } from './DiagnosisEditor';
 
 export interface CPPTContent {
@@ -777,6 +777,160 @@ export default function CPPTEditorModal({
     }
   };
 
+  // AI Diagnosis Workflow Generation State
+  const [isGeneratingDiagnosis, setIsGeneratingDiagnosis] = useState(false);
+  const [aiGeneratedDiagnoses, setAiGeneratedDiagnoses] = useState<Array<{
+    id: string;
+    type: 'primary' | 'differential';
+    diagnosis: string;
+    icd10: string;
+    confidence?: string | number;
+    justification?: string;
+    selected: boolean;
+  }>>([]);
+  const [aiGenError, setAiGenError] = useState<string | null>(null);
+  const [showAiDiagPanel, setShowAiDiagPanel] = useState(false);
+
+  const handleGenerateAIDiagnosis = async () => {
+    setIsGeneratingDiagnosis(true);
+    setAiGenError(null);
+    setShowAiDiagPanel(true);
+    try {
+      const pId = patient?.patient_id || 'P-001';
+      const res = await AgentService.executeChat({
+        user_query: 'Rekomendasi diagnosis kerja, diagnosis banding, dan kodefikasi ICD-10 pasien ini berdasarkan hasil pemeriksaan klinis, anamnesis, dan laboratorium SIMRS',
+        patient_id: pId,
+      });
+
+      const items: Array<{
+        id: string;
+        type: 'primary' | 'differential';
+        diagnosis: string;
+        icd10: string;
+        confidence?: string | number;
+        justification?: string;
+        selected: boolean;
+      }> = [];
+
+      const struct = res.structured_output as any;
+
+      // 1. Parse structured Pydantic output if available
+      if (struct?.assessment) {
+        if (struct.assessment.primary_diagnosis) {
+          const pd = struct.assessment.primary_diagnosis;
+          items.push({
+            id: `gen-prim-${Date.now()}-0`,
+            type: 'primary',
+            diagnosis: pd.diagnosis || 'Diagnosis Primer',
+            icd10: pd.icd10 || 'Unspecified',
+            confidence: pd.confidence ? `${Math.round(Number(pd.confidence) * (Number(pd.confidence) <= 1 ? 100 : 1))}%` : undefined,
+            justification: pd.notes || pd.justification,
+            selected: true,
+          });
+        }
+        if (Array.isArray(struct.assessment.differential_diagnoses)) {
+          struct.assessment.differential_diagnoses.forEach((dd: any, idx: number) => {
+            items.push({
+              id: `gen-diff-${Date.now()}-${idx + 1}`,
+              type: 'differential',
+              diagnosis: dd.diagnosis || 'Diagnosis Banding',
+              icd10: dd.icd10 || 'Unspecified',
+              confidence: dd.confidence ? `${Math.round(Number(dd.confidence) * (Number(dd.confidence) <= 1 ? 100 : 1))}%` : undefined,
+              justification: dd.notes || dd.clinical_clues || dd.justification,
+              selected: true,
+            });
+          });
+        }
+      }
+
+      // 2. Fallback: Parse from Markdown table synthesis
+      if (items.length === 0 && res.final_synthesis) {
+        const parsedCat = extractPatientDiagnosisCategories(patient, [
+          { role: 'assistant', content: res.final_synthesis }
+        ]);
+        parsedCat.primaryItems.forEach((p, idx) => {
+          items.push({
+            id: `gen-prim-${Date.now()}-${idx}`,
+            type: 'primary',
+            diagnosis: p.diagnosis,
+            icd10: p.icd10,
+            justification: p.justification,
+            selected: true,
+          });
+        });
+        parsedCat.diffItems.forEach((d, idx) => {
+          items.push({
+            id: `gen-diff-${Date.now()}-${idx}`,
+            type: 'differential',
+            diagnosis: d.diagnosis,
+            icd10: d.icd10,
+            justification: d.clues,
+            selected: true,
+          });
+        });
+      }
+
+      if (items.length === 0) {
+        setAiGenError('Tidak ada diagnosis spesifik yang diekstraksi dari respons AI.');
+      } else {
+        setAiGeneratedDiagnoses(items);
+      }
+    } catch (err: any) {
+      setAiGenError(err?.message || 'Gagal memanggil workflow rekomendasi diagnosis AI.');
+    } finally {
+      setIsGeneratingDiagnosis(false);
+    }
+  };
+
+  const handleToggleSelectAIDiag = (id: string) => {
+    setAiGeneratedDiagnoses(prev =>
+      prev.map(item => item.id === id ? { ...item, selected: !item.selected } : item)
+    );
+  };
+
+  const handleSelectAllAIDiag = (selectAll: boolean) => {
+    setAiGeneratedDiagnoses(prev =>
+      prev.map(item => ({ ...item, selected: selectAll }))
+    );
+  };
+
+  const handleInsertSelectedAIDiagnoses = () => {
+    const selectedItems = aiGeneratedDiagnoses.filter(d => d.selected);
+    if (selectedItems.length === 0) return;
+
+    const formattedLines = selectedItems.map(item => {
+      const isPrim = item.type === 'primary';
+      const typeLabel = isPrim ? 'Diagnosis Primer (Kerja)' : 'Diagnosis Banding';
+      const codePart = item.icd10 && item.icd10 !== 'Unspecified' ? ` (ICD-10: ${item.icd10})` : '';
+      const confPart = item.confidence ? ` [Keyakinan AI: ${item.confidence}]` : '';
+      const notePart = item.justification ? ` — ${isPrim ? 'Justifikasi' : 'Petunjuk'}: ${item.justification}` : '';
+      return `- ${typeLabel}: ${item.diagnosis}${codePart}${confPart}${notePart}`;
+    });
+
+    const newText = formattedLines.join('\n');
+    setAssessment(prev => {
+      const trimmed = prev.trim();
+      if (!trimmed) return newText;
+      return `${trimmed}\n${newText}`;
+    });
+  };
+
+  const handleInsertSingleAIDiag = (item: { type: string; diagnosis: string; icd10: string; confidence?: string | number; justification?: string }) => {
+    const isPrim = item.type === 'primary';
+    const typeLabel = isPrim ? 'Diagnosis Primer (Kerja)' : 'Diagnosis Banding';
+    const codePart = item.icd10 && item.icd10 !== 'Unspecified' ? ` (ICD-10: ${item.icd10})` : '';
+    const confPart = item.confidence ? ` [Keyakinan AI: ${item.confidence}]` : '';
+    const notePart = item.justification ? ` — ${isPrim ? 'Justifikasi' : 'Petunjuk'}: ${item.justification}` : '';
+    const itemText = `- ${typeLabel}: ${item.diagnosis}${codePart}${confPart}${notePart}`;
+
+    setAssessment(prev => {
+      const trimmed = prev.trim();
+      if (!trimmed) return itemText;
+      if (trimmed.includes(item.diagnosis)) return prev;
+      return `${trimmed}\n${itemText}`;
+    });
+  };
+
   const handleAppendDiagnosis = () => {
     if (!selectedDiagName.trim() && !selectedDiagCode.trim()) return;
     const isPrim = diagType === 'primary';
@@ -802,6 +956,7 @@ export default function CPPTEditorModal({
     setDiagJustification('');
     setShowDiagnosisModal(false);
   };
+
 
   const planCategories = React.useMemo(
     () => extractPatientPlanCategories(patient, messages?.map(m => ({ role: m.role, content: m.content }))),
@@ -1250,6 +1405,24 @@ export default function CPPTEditorModal({
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    onClick={handleGenerateAIDiagnosis}
+                    disabled={isGeneratingDiagnosis}
+                    className="px-3 py-1 rounded-xl bg-linear-to-r from-teal-600 via-blue-600 to-indigo-600 hover:from-teal-500 hover:to-indigo-500 text-white text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-xs active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isGeneratingDiagnosis ? (
+                      <>
+                        <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        <span>Menganalisis Klinis...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>✨</span>
+                        <span>Generate Rekomendasi Diagnosis (AI)</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => {
                       setDiagType('primary');
                       setShowDiagnosisModal(true);
@@ -1257,10 +1430,150 @@ export default function CPPTEditorModal({
                     className="px-2.5 py-1 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-xs active:scale-95 cursor-pointer"
                   >
                     <span>➕</span>
-                    <span>Tambah Diagnosis (ICD-10)</span>
+                    <span>Tambah Manual (ICD-10)</span>
                   </button>
                 </div>
               </div>
+
+              {/* AI Diagnosis Generated Workflow Results Panel */}
+              {showAiDiagPanel && (
+                <div className="p-3.5 rounded-xl bg-linear-to-r from-blue-500/10 via-indigo-500/10 to-teal-500/10 border border-blue-300 dark:border-blue-700 space-y-2.5">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm">✨</span>
+                      <span className="text-xs font-bold text-blue-950 dark:text-blue-200">
+                        Hasil Rekomendasi Diagnosis AI Co-Pilot
+                      </span>
+                      {isGeneratingDiagnosis && (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-blue-600 dark:text-blue-400 font-semibold animate-pulse">
+                          <span className="w-2.5 h-2.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></span>
+                          Menganalisis EMR SIMRS...
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {aiGeneratedDiagnoses.length > 0 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectAllAIDiag(true)}
+                            className="text-[10px] text-blue-700 dark:text-blue-300 hover:underline font-semibold cursor-pointer"
+                          >
+                            Pilih Semua
+                          </button>
+                          <span className="text-slate-300 dark:text-slate-600">|</span>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectAllAIDiag(false)}
+                            className="text-[10px] text-slate-500 dark:text-slate-400 hover:underline font-medium cursor-pointer"
+                          >
+                            Batal Pilih
+                          </button>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowAiDiagPanel(false)}
+                        className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs px-1 font-bold cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+
+                  {aiGenError && (
+                    <div className="p-2 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-[11px] text-red-700 dark:text-red-300">
+                      ⚠️ {aiGenError}
+                    </div>
+                  )}
+
+                  {aiGeneratedDiagnoses.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
+                        {aiGeneratedDiagnoses.map((item) => (
+                          <div
+                            key={item.id}
+                            onClick={() => handleToggleSelectAIDiag(item.id)}
+                            className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
+                              item.selected
+                                ? 'bg-white dark:bg-slate-900 border-blue-500 ring-2 ring-blue-500/20 shadow-xs'
+                                : 'bg-white/60 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 hover:border-blue-300 opacity-80'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-start gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={item.selected}
+                                  onChange={() => handleToggleSelectAIDiag(item.id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="mt-0.5 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                />
+                                <div>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span
+                                      className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
+                                        item.type === 'primary'
+                                          ? 'bg-blue-600 text-white'
+                                          : 'bg-amber-600 text-white'
+                                      }`}
+                                    >
+                                      {item.type === 'primary' ? 'Primer (Kerja)' : 'Banding'}
+                                    </span>
+                                    <span className="font-mono text-[10px] font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-1 rounded">
+                                      {item.icd10}
+                                    </span>
+                                    {item.confidence && (
+                                      <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-1 rounded">
+                                        {item.confidence}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] font-bold text-slate-900 dark:text-slate-100 mt-1">
+                                    {item.diagnosis}
+                                  </div>
+                                  {item.justification && (
+                                    <div className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5">
+                                      {item.justification}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleInsertSingleAIDiag(item);
+                                }}
+                                title="Langsung sisipkan item ini ke assessment"
+                                className="px-2 py-0.5 rounded bg-blue-100 hover:bg-blue-200 dark:bg-blue-950 dark:hover:bg-blue-900 text-blue-700 dark:text-blue-300 text-[10px] font-bold shrink-0 cursor-pointer"
+                              >
+                                + Sisipkan
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-blue-200 dark:border-blue-800/60">
+                        <span className="text-[10px] text-slate-600 dark:text-slate-400">
+                          {aiGeneratedDiagnoses.filter((d) => d.selected).length} dari {aiGeneratedDiagnoses.length} diagnosis dipilih
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleInsertSelectedAIDiagnoses}
+                          disabled={aiGeneratedDiagnoses.filter((d) => d.selected).length === 0}
+                          className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer active:scale-95"
+                        >
+                          <span>📥</span>
+                          <span>Sisipkan ({aiGeneratedDiagnoses.filter((d) => d.selected).length}) Diagnosis Terpilih ke Editor</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
 
               {/* Quick AI & SIMRS Diagnosis Chips */}
               {(diagnosisCategories.primaryItems.length > 0 || diagnosisCategories.diffItems.length > 0) && (
