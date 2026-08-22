@@ -583,7 +583,7 @@ def node_fetch_patient_anamnesis(state: MedicalAgentState) -> MedicalAgentState:
     anamnesis_result = None
     if simrs_mrn:
         anam_res = tool_simrs_get_patient_anamnesis(simrs_mrn)
-        if anam_res.get("status") == "success":
+        if anam_res.get("status") == "success" and anam_res.get("anamnesis"):
             anamnesis_result = anam_res["anamnesis"]
             steps.append({
                 "step_name": "2. Ambil Data Anamnesis SIMRS (MCP)",
@@ -600,8 +600,18 @@ def node_fetch_patient_anamnesis(state: MedicalAgentState) -> MedicalAgentState:
                     "tinjauan_sistem_organ": anamnesis_result.get("review_of_systems", {})
                 }
             })
+        else:
+            anamnesis_result = None
+            steps.append({
+                "step_name": "2. Ambil Data Anamnesis SIMRS (MCP)",
+                "description": f"Data anamnesis pasien {simrs_mrn} tidak ditemukan atau belum tercatat di SIMRS.",
+                "status": "info",
+                "result": "Tidak ada data anamnesis (dikosongkan)."
+            })
+    else:
+        anamnesis_result = None
 
-    chief = (anamnesis_result.get("chief_complaint") or "N/A (Konsultasi Umum)")[:50] if anamnesis_result else "N/A (Konsultasi Umum)"
+    chief = (anamnesis_result.get("chief_complaint") or "-")[:50] if anamnesis_result else "Data anamnesis kosong"
     _debug_node_end("fetch_patient_anamnesis", f"Chief Complaint: '{chief}'")
     _debug_edge("fetch_patient_anamnesis", "eval_simrs_labs")
     return {
@@ -609,6 +619,7 @@ def node_fetch_patient_anamnesis(state: MedicalAgentState) -> MedicalAgentState:
         "steps_executed": steps,
         "simrs_anamnesis": anamnesis_result
     }
+
 
 
 # Node 2.2b: Evaluasi Hasil Lab dan Pemeriksaan SIMRS (MCP)
@@ -1592,11 +1603,11 @@ def _generate_fallback_synthesis(
         )
         return knowledge_schema.to_markdown(), knowledge_schema.model_dump()
 
-    chief_c = simrs_anamnesis.get("chief_complaint", "Nyeri ulu hati, mual, lemas") if simrs_anamnesis else "Keluhan klinis terkontrol"
-    hpi_c = simrs_anamnesis.get("history_present_illness", "Keluhan dirasakan memberat sejak 3 hari terakhir.") if simrs_anamnesis else ""
-    pmh_c = simrs_anamnesis.get("past_medical_history", "Riwayat penyakit terkontrol") if simrs_anamnesis else ""
-    allergy_c = simrs_anamnesis.get("allergy_history", "Tidak ada riwayat alergi") if simrs_anamnesis else "Tidak ada riwayat alergi"
-    meds_c = simrs_anamnesis.get("medication_history", "Tidak ada riwayat obat rutin") if simrs_anamnesis else ""
+    chief_c = simrs_anamnesis.get("chief_complaint", "-") if simrs_anamnesis else "-"
+    hpi_c = simrs_anamnesis.get("history_present_illness", "-") if simrs_anamnesis else "-"
+    pmh_c = simrs_anamnesis.get("past_medical_history", "-") if simrs_anamnesis else "-"
+    allergy_c = simrs_anamnesis.get("allergy_history", "Tidak ada riwayat alergi terdokumentasi") if simrs_anamnesis else "Tidak ada riwayat alergi terdokumentasi"
+    meds_c = simrs_anamnesis.get("medication_history", "-") if simrs_anamnesis else "-"
     subj_model = SubjectiveData(
         chief_complaint=chief_c,
         history_present_illness=hpi_c,
@@ -1604,6 +1615,7 @@ def _generate_fallback_synthesis(
         allergy_history=allergy_c,
         medication_history=meds_c
     )
+
 
     v_dict = simrs_labs.get("vital_signs", {}) if simrs_labs else {}
     vs_model = VitalSignsData(

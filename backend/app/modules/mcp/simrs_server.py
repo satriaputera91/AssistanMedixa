@@ -544,20 +544,12 @@ class SIMRSMCPServer:
             if anamnesis:
                 return {"status": "success", "mrn": anamnesis["mrn"], "anamnesis": anamnesis}
             return {
-                "status": "success",
+                "status": "not_found",
                 "mrn": resolved_mrn,
-                "anamnesis": {
-                    "mrn": resolved_mrn,
-                    "patient_name": profile.get("full_name") if profile else "Pasien SIMRS",
-                    "chief_complaint": "Pemeriksaan dan konsultasi klinis rutin",
-                    "history_present_illness": "Pasien datang untuk evaluasi berkala dan pemeriksaan kesehatan.",
-                    "past_medical_history": "Riwayat penyakit terkontrol.",
-                    "family_history": "Tidak ada riwayat penyakit herediter spesifik.",
-                    "medication_history": "Pengobatan rutin sesuai anjuran DPJP.",
-                    "allergy_history": "Tidak ada riwayat alergi terdokumentasi.",
-                    "review_of_systems": {}
-                }
+                "anamnesis": None,
+                "message": f"Data anamnesis untuk MRN '{mrn}' belum tersedia di SIMRS"
             }
+
 
         elif tool_name == "simrs.get_patient_labs":
             mrn = arguments.get("mrn", "")
