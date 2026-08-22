@@ -155,7 +155,7 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
             "result": error,
         })
         _debug_node_end("audio_transcription", f"FAILED: {error}")
-        _debug_edge("audio_transcription", "audio_soa_summary")
+        _debug_edge("audio_transcription", "audio_soap_summary")
         return {**state, "steps_executed": steps, "audio_error": error}
 
     try:
@@ -194,8 +194,9 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
             "result": f"Transkrip terdiarisasi selesai ({len(transcript)} karakter).",
         })
         _debug_node_end("audio_transcription", f"Transcript length: {len(transcript)} chars")
-        _debug_edge("audio_transcription", "audio_soa_summary")
+        _debug_edge("audio_transcription", "audio_soap_summary")
         return {**state, "steps_executed": steps, "audio_transcript": transcript, "audio_error": None}
+
     except Exception as exc:
         error = f"Transkripsi audio gagal: {str(exc)[:180]}"
         steps.append({
@@ -205,13 +206,13 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
             "result": error,
         })
         _debug_node_end("audio_transcription", f"ERROR: {error}")
-        _debug_edge("audio_transcription", "audio_soa_summary")
+        _debug_edge("audio_transcription", "audio_soap_summary")
         return {**state, "steps_executed": steps, "audio_error": error}
 
 
-def node_audio_soa_summary(state: MedicalAgentState) -> MedicalAgentState:
+def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
     """Create a SOAP-derived S/O/A note from the diarized transcript in Gemini."""
-    _debug_node_start("audio_soa_summary", state, icon="📋")
+    _debug_node_start("audio_soap_summary", state, icon="📋")
     steps = list(state.get("steps_executed", []))
     transcript = state.get("audio_transcript") or ""
     error = state.get("audio_error")
@@ -219,8 +220,8 @@ def node_audio_soa_summary(state: MedicalAgentState) -> MedicalAgentState:
 
     if error or not transcript:
         final_text = "## Proses audio tidak dapat diselesaikan\n\n" + (error or "Transkrip audio kosong.")
-        _debug_node_end("audio_soa_summary", "No transcript available")
-        _debug_edge("audio_soa_summary", "END")
+        _debug_node_end("audio_soap_summary", "No transcript available")
+        _debug_edge("audio_soap_summary", "END")
         return {**state, "steps_executed": steps, "final_synthesis": final_text}
 
     prompt = f"""Berikut adalah transkrip rekaman klinis terdiarisasi (Dokter & Pasien) dalam Bahasa Indonesia.
@@ -229,14 +230,16 @@ def node_audio_soa_summary(state: MedicalAgentState) -> MedicalAgentState:
 {transcript}
 --- AKHIR TRANSKRIP ---
 
-Berdasarkan transkrip di atas, susun resume klinis terstruktur dalam format Markdown berikut:
+Tugas Anda adalah menyusun resume klinis terstruktur (SOAP note) berdasarkan percakapan di atas.
+Gunakan format terstruktur standar berikut dengan heading Markdown:
 
-## 📋 Resume Klinis (S-O-A-P)
-### S — Subjective (Data Anamnesis)
-[Data Anamnesis: Keluhan utama, riwayat penyakit saat ini (RPS), riwayat medis/alergi, dan gejala yang disampaikan oleh Pasien]
+## Resume Konsultasi Klinis (SOAP Note)
 
-### O — Objective (Data Observasi & Pemeriksaan)
-[Data Observasi: Temuan observasi klinis, pemeriksaan fisik, tanda-tanda vital (TTV), atau hasil lab yang diobservasi/dikonfirmasi oleh Dokter]
+### S — Subjective (Keluhan & Riwayat Pasien)
+[Rangkuman keluhan utama, riwayat penyakit, riwayat obat, dan gejala yang disampaikan Pasien]
+
+### O — Objective (Pemeriksaan & Observasi)
+[Temuan pemeriksaan fisik, tanda vital, atau hasil lab/penunjang yang disebutkan dalam dialog]
 
 ### A — Assessment (Diagnosis & Penilaian Klinis)
 [Kesimpulan diagnosis kerja atau penilaian klinis yang didiskusikan]
@@ -277,7 +280,7 @@ Berdasarkan transkrip di atas, susun resume klinis terstruktur dalam format Mark
         })
         # Build structured AudioConsultationSOAPSchema
         audio_soap = AudioConsultationSOAPSchema(
-            audio_filename=filename,
+            audio_filename=state.get("audio_filename", "audio.wav"),
             transcript=transcript,
             soap=ClinicalSOAPOutputSchema(
                 title="Catatan Perkembangan Pasien Terintegrasi (Hasil Audio STT)",
@@ -289,8 +292,8 @@ Berdasarkan transkrip di atas, susun resume klinis terstruktur dalam format Mark
                 plan=PlanData(patient_education=["Lanjutkan terapi sesuai instruksi dokter pada rekaman"])
             )
         )
-        _debug_node_end("audio_soa_summary", f"SOAP clinical note synthesized ({len(final_text)} chars)")
-        _debug_edge("audio_soa_summary", "validate_output")
+        _debug_node_end("audio_soap_summary", f"SOAP clinical note synthesized ({len(final_text)} chars)")
+        _debug_edge("audio_soap_summary", "validate_output")
         return {
             **state,
             "steps_executed": steps,
@@ -308,8 +311,8 @@ Berdasarkan transkrip di atas, susun resume klinis terstruktur dalam format Mark
             "status": "failed",
             "result": error,
         })
-        _debug_node_end("audio_soa_summary", f"ERROR: {error}")
-        _debug_edge("audio_soa_summary", "validate_output")
+        _debug_node_end("audio_soap_summary", f"ERROR: {error}")
+        _debug_edge("audio_soap_summary", "validate_output")
         return {
             **state,
             "steps_executed": steps,
@@ -1749,15 +1752,16 @@ def build_medical_agent_graph(checkpointer=None):
     workflow.add_node("synthesis", node_gemini_synthesis)
     workflow.add_node("validate_output", node_validate_output)
     workflow.add_node("audio_transcription", node_audio_transcription)
-    workflow.add_node("audio_soa_summary", node_audio_soa_summary)
+    workflow.add_node("audio_soap_summary", node_audio_soap_summary)
     
     # Connect edges
     workflow.set_conditional_entry_point(
         _route_entry_point,
         {"audio_transcription": "audio_transcription", "planner": "planner"},
     )
-    workflow.add_edge("audio_transcription", "audio_soa_summary")
-    workflow.add_edge("audio_soa_summary", "validate_output")
+    workflow.add_edge("audio_transcription", "audio_soap_summary")
+    workflow.add_edge("audio_soap_summary", "validate_output")
+
     
     # Conditional edge from planner:
     # - General consultation: routes to "tools" (RAG/KM only) or "synthesis", skipping SIMRS read nodes entirely
