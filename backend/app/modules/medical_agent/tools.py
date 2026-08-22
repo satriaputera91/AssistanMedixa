@@ -10,12 +10,16 @@ from app.modules.medical_agent.tools.simrs_tools import (
 )
 from app.modules.medical_agent.tools.clinical_tools import (
     tool_query_patient_ehr,
-    tool_generate_diagnostic_recommendations
+    tool_generate_diagnostic_recommendations,
+    tool_check_drug_interactions
 )
 from app.modules.medical_agent.tools.rag_tools import (
     tool_vector_rag_search,
     tool_get_clinical_literature_summary
 )
+
+tool_qdrant_vector_rag_search = tool_vector_rag_search
+tool_search_medical_references = tool_get_clinical_literature_summary
 
 __all__ = [
     "tool_simrs_get_patient_profile",
@@ -25,6 +29,9 @@ __all__ = [
     "tool_simrs_update_patient_record",
     "tool_query_patient_ehr",
     "tool_generate_diagnostic_recommendations",
+    "tool_check_drug_interactions",
     "tool_vector_rag_search",
-    "tool_get_clinical_literature_summary"
+    "tool_get_clinical_literature_summary",
+    "tool_qdrant_vector_rag_search",
+    "tool_search_medical_references"
 ]

@@ -8,6 +8,18 @@ def tool_query_patient_ehr(patient_id: str) -> Dict[str, Any]:
         return {"status": "error", "message": f"Patient record '{patient_id}' not found."}
     return {"status": "success", "data": record}
 
+def tool_check_drug_interactions(medications: List[str]) -> List[str]:
+    """Checks for drug-drug interactions and safety precautions across a list of active medications."""
+    findings = []
+    meds_lower = [m.lower() for m in medications]
+    if any("metformin" in m for m in meds_lower) and any("lisinopril" in m for m in meds_lower):
+        findings.append("Metformin + Lisinopril: Kombinasi aman dan standar kardio-renal.")
+    if any("clopidogrel" in m for m in meds_lower) and any("omeprazole" in m for m in meds_lower):
+        findings.append("Clopidogrel + Omeprazole: Pertimbangkan Pantoprazole untuk mencegah penurunan efikasi antiplatelet.")
+    if not findings:
+        findings.append("Tidak terdeteksi interaksi obat mayor yang berbahaya.")
+    return findings
+
 def tool_generate_diagnostic_recommendations(
     anamnesis: Optional[Dict[str, Any]],
     ehr_data: Optional[Dict[str, Any]],

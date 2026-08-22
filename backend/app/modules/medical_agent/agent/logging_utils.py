@@ -49,3 +49,9 @@ def log_edge_transition(source: str, target: str, condition: str = ""):
         f"🔀 [LANGGRAPH EDGE TRANSITION] {source} ──▶ {target}{cond_str}",
         stacklevel=2
     )
+
+
+# Backward compatibility aliases
+_debug_node_start = log_node_start
+_debug_node_end = log_node_end
+_debug_edge = log_edge_transition
