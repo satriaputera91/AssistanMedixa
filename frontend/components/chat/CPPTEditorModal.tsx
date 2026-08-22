@@ -1482,10 +1482,22 @@ export default function CPPTEditorModal({
                   </div>
 
                   {aiGenError && (
-                    <div className="p-2 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-[11px] text-red-700 dark:text-red-300">
-                      ⚠️ {aiGenError}
+                    <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-[11px] text-red-700 dark:text-red-300 flex items-center justify-between flex-wrap gap-2">
+                      <span>⚠️ {aiGenError}</span>
+                      <button
+                        type="button"
+                        onClick={handleGenerateAIDiagnosis}
+                        disabled={isGeneratingDiagnosis}
+                        className="px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-bold text-[10px] flex items-center gap-1 transition-all shadow-xs cursor-pointer active:scale-95"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        <span>Coba Lagi (Retry)</span>
+                      </button>
                     </div>
                   )}
+
 
                   {aiGeneratedDiagnoses.length > 0 && (
                     <div className="space-y-2">

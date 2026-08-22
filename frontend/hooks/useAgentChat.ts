@@ -107,15 +107,22 @@ export function useAgentChat() {
       // Refresh sessions list after successful chat
       await loadSessions();
     } catch (e: any) {
+      const is500OrServerErr = e?.status >= 500 || e?.message?.includes('500') || e?.message?.includes('Internal Server Error') || e?.status === 500;
       const errMsg: ChatMessage = {
         role: 'assistant',
         content: formatErrorMessage(e, 'Proses agen gagal'),
         timestamp: new Date().toISOString(),
+        metadata: {
+          is_error: true,
+          error_code: is500OrServerErr ? 500 : (e?.status || 500),
+          retry_query: query,
+        },
       };
       setMessages(prev => [...prev, errMsg]);
     } finally {
       setExecuting(false);
     }
+
   }, [executing, selectedPatient, activeSessionId, loadSessions]);
 
   const replaceSOANote = useCallback((note: any) => {
@@ -199,10 +206,16 @@ export function useAgentChat() {
         role: 'assistant',
         content: formatErrorMessage(e, 'Pemrosesan audio gagal'),
         timestamp: new Date().toISOString(),
+        metadata: {
+          is_error: true,
+          error_code: e?.status || 500,
+          retry_audio_file: audio,
+        },
       }]);
     } finally {
       setExecuting(false);
     }
+
   }, [executing, selectedPatient, activeSessionId, loadSessions]);
 
   const startNewSession = useCallback(() => {

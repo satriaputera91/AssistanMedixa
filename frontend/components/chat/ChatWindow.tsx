@@ -314,23 +314,34 @@ export default function ChatWindow({
                 m.role === 'assistant' &&
                 !isNoPatientWarning &&
                 m.metadata?.type === 'soa_note' &&
-                m.metadata.note;
+                Boolean(m.metadata.note);
+
+              const isErrorMessage =
+                m.role === 'assistant' &&
+                (Boolean(m.metadata?.is_error) ||
+                  displayContent.includes('Error 500') ||
+                  displayContent.includes('kendala teknis') ||
+                  displayContent.startsWith('⚠️ Terjadi kendala') ||
+                  displayContent.startsWith('⚠️ Koneksi ke server'));
+
 
               return (
                 <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div
                     className={`max-w-3xl rounded-2xl p-5 ${m.role === 'user'
                       ? 'bg-emerald-600 text-white rounded-br-none shadow-md'
-                      : 'bg-white dark:bg-slate-900 border border-emerald-200 dark:border-slate-800 text-emerald-900 dark:text-slate-100 rounded-bl-none shadow-sm'
+                      : isErrorMessage
+                        ? 'bg-red-50/90 dark:bg-red-950/40 border border-red-300 dark:border-red-800 text-red-950 dark:text-red-200 rounded-bl-none shadow-sm'
+                        : 'bg-white dark:bg-slate-900 border border-emerald-200 dark:border-slate-800 text-emerald-900 dark:text-slate-100 rounded-bl-none shadow-sm'
                       }`}
                   >
                     <div className="text-[10px] opacity-80 mb-2 font-semibold uppercase tracking-wider flex items-center gap-1.5">
                       {m.role === 'user' ? (
                         <span>👤 Anda (Dokter)</span>
                       ) : (
-                        <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-bold">
+                        <span className={`flex items-center gap-1.5 font-bold ${isErrorMessage ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>
                           <BotAvatar size="sm" />
-                          <span>Asisten AI Medis</span>
+                          <span>{isErrorMessage ? 'Sistem AI Medis (Error)' : 'Asisten AI Medis'}</span>
                         </span>
                       )}
                       <span className="opacity-50">• {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -349,9 +360,44 @@ export default function ChatWindow({
                       <>
                         <MarkdownContent content={displayContent} />
 
+                        {/* Retry Button for Error 500 / Server Errors */}
+                        {isErrorMessage && (
+                          <div className="mt-3 pt-2.5 border-t border-red-200 dark:border-red-800/60 flex items-center justify-between flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (m.metadata?.retry_audio_file) {
+                                  onSendAudio(m.metadata.retry_audio_file);
+                                } else {
+                                  let retryQuery = m.metadata?.retry_query;
+                                  if (!retryQuery) {
+                                    for (let k = i - 1; k >= 0; k--) {
+                                      if (messages[k]?.role === 'user' && !messages[k]?.content.startsWith('[Rekaman Audio]')) {
+                                        retryQuery = messages[k].content;
+                                        break;
+                                      }
+                                    }
+                                  }
+                                  if (retryQuery) {
+                                    onSend(retryQuery);
+                                  }
+                                }
+                              }}
+                              disabled={executing}
+                              className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-xs active:scale-95 cursor-pointer"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                              </svg>
+                              <span>Coba Lagi (Retry)</span>
+                            </button>
+                          </div>
+                        )}
+
                         {/* Interactive Edit Button for Anamnesis Messages */}
                         {isAnamnesisMessage && (
                           <div className="mt-3 pt-3 border-t border-emerald-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2">
+
                             <span className="text-[11px] text-emerald-700 dark:text-slate-400 flex items-center gap-1 font-semibold">
                               <span>📝</span>
                               <span>Data Anamnesis Klinis Pasien (RME SIMRS)</span>
