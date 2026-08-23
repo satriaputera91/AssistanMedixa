@@ -7,9 +7,12 @@ from app.modules.guardrails.schemas import (
     GuardrailConfigSchema,
     TestGuardrailRequest,
     TestGuardrailResponse,
-    GuardrailViolationSchema
+    GuardrailViolationSchema,
+    ValidateOutputRequest,
 )
 from app.modules.guardrails.service import GuardrailsService
+from app.modules.guardrails.output_validator import LLMOutputValidator
+
 
 router = APIRouter(prefix="/guardrails", tags=["AI Safety & Guardrails"])
 
@@ -70,7 +73,28 @@ def test_guardrails(
         
     return evaluation
 
+@router.post("/validate-output")
+def validate_clinical_output(
+    request: ValidateOutputRequest,
+    current_user: TokenPayload = Depends(require_role(["admin", "doctor"]))
+):
+    """
+    Comprehensive live testing endpoint for validating LLM clinical output.
+    Evaluates grounding, allergy contraindications, red flag coverage, and disclaimers.
+    """
+    simrs_anamnesis = {"allergy_history": request.allergies} if request.allergies else None
+    red_flag_detections = {"detected_red_flags": [{"title": rf} for rf in request.red_flags]} if request.red_flags else None
+
+    result = LLMOutputValidator.evaluate_all(
+        output_text=request.text,
+        simrs_anamnesis=simrs_anamnesis,
+        red_flag_detections=red_flag_detections,
+        config=db.guardrail_config
+    )
+    return result
+
 @router.get("/violations", response_model=List[GuardrailViolationSchema])
+
 def list_guardrail_violations(current_user: TokenPayload = Depends(require_role(["admin"]))):
     """List historical audit logs of blocked queries and safety violations (Admin Only)."""
     return db.guardrail_violations

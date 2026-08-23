@@ -3,7 +3,7 @@ from typing import List
 from datetime import datetime, timedelta
 from collections import Counter
 from app.core.security import require_role, get_password_hash, TokenPayload
-from app.core.database import db
+from app.core.database import dbApplication
 from app.core.config import settings
 from app.modules.admin.schemas import (
     CreateUserRequest, 
@@ -21,15 +21,15 @@ router = APIRouter(prefix="/admin", tags=["Admin Dashboard"])
 
 @router.get("/stats", response_model=AdminStatsResponse)
 def get_admin_stats(current_user: TokenPayload = Depends(require_role(["admin"]))):
-    doctors_count = sum(1 for u in db.users.values() if u.get("role") == "doctor")
-    admins_count = sum(1 for u in db.users.values() if u.get("role") == "admin")
-    total_tokens = sum(log.get("tokens_used", 0) for log in db.audit_logs)
+    doctors_count = sum(1 for u in dbApplication.users.values() if u.get("role") == "doctor")
+    admins_count = sum(1 for u in dbApplication.users.values() if u.get("role") == "admin")
+    total_tokens = sum(log.get("tokens_used", 0) for log in dbApplication.audit_logs)
     
     return AdminStatsResponse(
         total_doctors=doctors_count,
         total_admins=admins_count,
-        total_chat_sessions=len(db.chat_sessions),
-        total_queries_run=len(db.audit_logs),
+        total_chat_sessions=len(dbApplication.chat_sessions),
+        total_queries_run=len(dbApplication.audit_logs),
         total_gemini_tokens=total_tokens,
         gemini_model_active=settings.GEMINI_MODEL_NAME
     )
@@ -38,7 +38,7 @@ def get_admin_stats(current_user: TokenPayload = Depends(require_role(["admin"])
 @router.get("/analytics", response_model=UsageAnalyticsResponse)
 def get_usage_analytics(current_user: TokenPayload = Depends(require_role(["admin"]))):
     """Aggregated usage data for the admin dashboard without exposing patient content."""
-    logs = db.audit_logs
+    logs = dbApplication.audit_logs
     total_tokens = sum(log.get("tokens_used", 0) for log in logs)
     daily = { (datetime.now() - timedelta(days=offset)).date().isoformat(): {"requests": 0, "tokens": 0} for offset in range(6, -1, -1) }
     for log in logs:
@@ -94,16 +94,16 @@ def get_system_monitoring(current_user: TokenPayload = Depends(require_role(["ad
 
 @router.get("/users", response_model=List[UserAdminView])
 def list_users(current_user: TokenPayload = Depends(require_role(["admin"]))):
-    return [UserAdminView(**u) for u in db.users.values()]
+    return [UserAdminView(**u) for u in dbApplication.users.values()]
 
 @router.post("/users", response_model=UserAdminView)
 def create_user(request: CreateUserRequest, current_user: TokenPayload = Depends(require_role(["admin"]))):
     # Check if email exists
-    for u in db.users.values():
+    for u in dbApplication.users.values():
         if u["email"].lower() == request.email.lower():
             raise HTTPException(status_code=400, detail="User with this email already exists")
 
-    new_id = f"u{len(db.users) + 1}"
+    new_id = f"u{len(dbApplication.users) + 1}"
     new_user = {
         "id": new_id,
         "email": request.email,
@@ -115,12 +115,12 @@ def create_user(request: CreateUserRequest, current_user: TokenPayload = Depends
         "is_active": True,
         "created_at": datetime.now().isoformat()
     }
-    db.users[new_id] = new_user
+    dbApplication.users[new_id] = new_user
     return UserAdminView(**new_user)
 
 @router.post("/users/{user_id}/toggle-status")
 def toggle_user_status(user_id: str, current_user: TokenPayload = Depends(require_role(["admin"]))):
-    user = db.users.get(user_id)
+    user = dbApplication.users.get(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user["is_active"] = not user.get("is_active", True)
@@ -128,4 +128,4 @@ def toggle_user_status(user_id: str, current_user: TokenPayload = Depends(requir
 
 @router.get("/audit-logs", response_model=List[AuditLogItem])
 def get_audit_logs(current_user: TokenPayload = Depends(require_role(["admin"]))):
-    return [AuditLogItem(**log) for log in db.audit_logs]
+    return [AuditLogItem(**log) for log in dbApplication.audit_logs]

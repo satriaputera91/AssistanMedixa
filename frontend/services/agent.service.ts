@@ -13,6 +13,47 @@ export interface AgentStep {
   result: any;
 }
 
+export interface TempSOAPContent {
+  subjective: string;
+  objective: string;
+  assessment: string;
+  plan?: string;
+  instructions?: string;
+}
+
+export interface TempSOAPRecord {
+  temp_id: string;
+  session_id: string;
+  patient_id?: string | null;
+  patient_name?: string | null;
+  mrn?: string | null;
+  nik?: string | null;
+  user_id: string;
+  doctor_name: string;
+  audio_filename: string;
+  audio_url: string;
+  audio_path?: string | null;
+  audio_size_bytes: number;
+  audio_transcript: string;
+  soap_content: TempSOAPContent;
+  raw_markdown: string;
+  structured_output?: Record<string, any> | null;
+  status: 'draft' | 'pending_review' | 'ready_for_simrs' | 'synced_to_simrs';
+  simrs_sync_status: 'pending' | 'synced' | 'failed';
+  simrs_log_id?: string | null;
+  simrs_response?: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+  synced_at?: string | null;
+}
+
+export interface TempSOAPCommitResponse {
+  status: string;
+  message: string;
+  temp_soap: TempSOAPRecord;
+  simrs_response?: Record<string, any> | null;
+}
+
 export interface AgentChatResponse {
   session_id: string;
   user_query: string;
@@ -22,7 +63,11 @@ export interface AgentChatResponse {
   workflow_type?: 'text' | 'audio';
   audio_transcript?: string | null;
   soa_note?: SOANote | null;
+  temp_soap?: TempSOAPRecord | null;
+  structured_output?: Record<string, any> | null;
+  output_validation?: Record<string, any> | null;
 }
+
 
 export interface SOAContent {
   subjective: string;
@@ -74,6 +119,8 @@ export interface ChatSession {
   title: string;
   created_at: string;
   patient_id?: string;
+  temp_soap_id?: string | null;
+  temp_soap?: TempSOAPRecord | null;
   messages: { role: string; content: string; timestamp: string; metadata?: Record<string, any> | null }[];
 }
 
@@ -138,6 +185,46 @@ export class AgentService {
 
   public static async selectClinicRoom(roomId: string): Promise<{ status: string; selected_room: ClinicRoom }> {
     return ApiClient.post<{ status: string; selected_room: ClinicRoom }>('/agent/clinic-rooms/select', { room_id: roomId });
+  }
+
+  // ── Temporary SOAP Pre-SIMRS Methods ──────────────────────────────
+
+  public static async getTempSOAPList(patientId?: string, status?: string): Promise<TempSOAPRecord[]> {
+    const params = new URLSearchParams();
+    if (patientId) params.append('patient_id', patientId);
+    if (status) params.append('status', status);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return ApiClient.get<TempSOAPRecord[]>(`/agent/soap-temp${query}`);
+  }
+
+  public static async getTempSOAP(tempId: string): Promise<TempSOAPRecord> {
+    return ApiClient.get<TempSOAPRecord>(`/agent/soap-temp/${tempId}`);
+  }
+
+  public static async getTempSOAPBySession(sessionId: string): Promise<TempSOAPRecord | null> {
+    return ApiClient.get<TempSOAPRecord | null>(`/agent/soap-temp/session/${sessionId}`);
+  }
+
+  public static async updateTempSOAP(
+    tempId: string,
+    data: { soap_content?: TempSOAPContent; raw_markdown?: string; status?: string }
+  ): Promise<TempSOAPRecord> {
+    return ApiClient.put<TempSOAPRecord>(`/agent/soap-temp/${tempId}`, data);
+  }
+
+  public static async deleteTempSOAP(tempId: string): Promise<{ status: string; temp_id: string }> {
+    return ApiClient.delete<{ status: string; temp_id: string }>(`/agent/soap-temp/${tempId}`);
+  }
+
+  public static async commitTempSOAPToSIMRS(tempId: string): Promise<TempSOAPCommitResponse> {
+    return ApiClient.post<TempSOAPCommitResponse>(`/agent/soap-temp/${tempId}/commit-simrs`, {});
+  }
+
+  public static getAudioStreamUrl(tempIdOrAudioUrl: string): string {
+    if (tempIdOrAudioUrl.startsWith('http') || tempIdOrAudioUrl.startsWith('/api')) {
+      return tempIdOrAudioUrl;
+    }
+    return `/api/v1/agent/soap-temp/${tempIdOrAudioUrl}/audio`;
   }
 }
 

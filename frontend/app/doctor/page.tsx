@@ -29,6 +29,8 @@ export default function DoctorPage() {
     sendAudio,
     reviewSOA,
     confirmSOA,
+    commitTempSOAP,
+    updateTempSOAP,
   } = useAgentChat();
 
   // Clinic room state
@@ -127,6 +129,8 @@ export default function DoctorPage() {
             onSendAudio={sendAudio}
             onReviewSOA={reviewSOA}
             onConfirmSOA={confirmSOA}
+            onCommitTempSOAP={commitTempSOAP}
+            onUpdateTempSOAP={updateTempSOAP}
             patients={patients}
             selectedPatient={selectedPatient}
             onSelectPatient={setSelectedPatient}

@@ -33,3 +33,7 @@ class MedicalAgentState(TypedDict, total=False):
     audio_mime_type: Optional[str]
     audio_transcript: Optional[str]
     audio_error: Optional[str]
+    output_validation: Optional[Dict[str, Any]]
+    structured_output: Optional[Dict[str, Any]]
+    session_id: Optional[str]
+    temp_soap_data: Optional[Dict[str, Any]]

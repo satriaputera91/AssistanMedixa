@@ -13,6 +13,8 @@ class ChatSessionSchema(BaseModel):
     title: str
     created_at: str
     patient_id: Optional[str] = None
+    temp_soap_id: Optional[str] = None
+    temp_soap: Optional[Dict[str, Any]] = None
     messages: List[ChatMessageSchema]
 
 class CreateSessionRequest(BaseModel):

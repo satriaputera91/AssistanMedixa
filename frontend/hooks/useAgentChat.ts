@@ -1,6 +1,14 @@
 'use client';
 import { useState, useCallback } from 'react';
-import { AgentService, type AgentChatResponse, type PatientRecord, type ChatSession, type SOAContent } from '@/services/agent.service';
+import {
+  AgentService,
+  type AgentChatResponse,
+  type PatientRecord,
+  type ChatSession,
+  type SOAContent,
+  type TempSOAPRecord,
+  type TempSOAPContent,
+} from '@/services/agent.service';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -33,6 +41,7 @@ export function useAgentChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [executing, setExecuting] = useState(false);
   const [steps, setSteps] = useState<any[]>([]);
+  const [activeTempSOAP, setActiveTempSOAP] = useState<TempSOAPRecord | null>(null);
 
   const loadPatients = useCallback(async (roomId?: string) => {
     try {
@@ -65,6 +74,18 @@ export function useAgentChat() {
         }))
       );
       if (data.patient_id) setSelectedPatient(data.patient_id);
+      if (data.temp_soap) {
+        setActiveTempSOAP(data.temp_soap);
+      } else if (data.temp_soap_id) {
+        try {
+          const soapData = await AgentService.getTempSOAP(data.temp_soap_id);
+          setActiveTempSOAP(soapData);
+        } catch {
+          setActiveTempSOAP(null);
+        }
+      } else {
+        setActiveTempSOAP(null);
+      }
     } catch (e) {
       console.error('Failed to load session:', e);
     }
@@ -107,15 +128,22 @@ export function useAgentChat() {
       // Refresh sessions list after successful chat
       await loadSessions();
     } catch (e: any) {
+      const is500OrServerErr = e?.status >= 500 || e?.message?.includes('500') || e?.message?.includes('Internal Server Error') || e?.status === 500;
       const errMsg: ChatMessage = {
         role: 'assistant',
         content: formatErrorMessage(e, 'Proses agen gagal'),
         timestamp: new Date().toISOString(),
+        metadata: {
+          is_error: true,
+          error_code: is500OrServerErr ? 500 : (e?.status || 500),
+          retry_query: query,
+        },
       };
       setMessages(prev => [...prev, errMsg]);
     } finally {
       setExecuting(false);
     }
+
   }, [executing, selectedPatient, activeSessionId, loadSessions]);
 
   const replaceSOANote = useCallback((note: any) => {
@@ -180,6 +208,9 @@ export function useAgentChat() {
         selectedPatient || null,
         activeSessionId || null,
       );
+      if (data.temp_soap) {
+        setActiveTempSOAP(data.temp_soap);
+      }
       setMessages(prev => [...prev, {
         role: 'assistant',
         content:
@@ -187,6 +218,7 @@ export function useAgentChat() {
           'Mohon maaf Dokter, resume audio klinis belum dapat diproses.',
         timestamp: new Date().toISOString(),
         metadata: {
+          ...(data.temp_soap ? { type: 'temp_soap', temp_soap: data.temp_soap } : {}),
           ...(data.soa_note ? { type: 'soa_note', note: data.soa_note } : {}),
           steps: data.steps_executed || [],
         },
@@ -199,16 +231,89 @@ export function useAgentChat() {
         role: 'assistant',
         content: formatErrorMessage(e, 'Pemrosesan audio gagal'),
         timestamp: new Date().toISOString(),
+        metadata: {
+          is_error: true,
+          error_code: e?.status || 500,
+          retry_audio_file: audio,
+        },
       }]);
     } finally {
       setExecuting(false);
     }
+
   }, [executing, selectedPatient, activeSessionId, loadSessions]);
+
+  const commitTempSOAP = useCallback(async (tempId: string) => {
+    if (executing) return;
+    setExecuting(true);
+    try {
+      const res = await AgentService.commitTempSOAPToSIMRS(tempId);
+      setActiveTempSOAP(res.temp_soap);
+      // Update metadata in messages
+      setMessages(prev => prev.map(m => {
+        if (m.metadata?.temp_soap?.temp_id === tempId) {
+          return {
+            ...m,
+            metadata: {
+              ...m.metadata,
+              temp_soap: res.temp_soap,
+            },
+          };
+        }
+        return m;
+      }));
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `✅ **Catatan CPPT S-O-A-P berhasil dikirim dan disinkronisasikan ke SIMRS!**\n\n- No. Rekam Medis: \`${res.temp_soap.mrn || 'N/A'}\`\n- Diagnosa: ${res.temp_soap.soap_content?.assessment || '-'}\n- Log SIMRS: \`${res.simrs_response?.log_id || 'OK'}\``,
+        timestamp: new Date().toISOString(),
+        metadata: {
+          type: 'simrs_sync_result',
+          temp_id: tempId,
+          simrs_response: res.simrs_response,
+        },
+      }]);
+      await loadSessions();
+      return res;
+    } catch (e: any) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: formatErrorMessage(e, 'Gagal mengirim CPPT ke SIMRS'),
+        timestamp: new Date().toISOString(),
+      }]);
+      throw e;
+    } finally {
+      setExecuting(false);
+    }
+  }, [executing, loadSessions]);
+
+  const updateTempSOAP = useCallback(async (tempId: string, content: TempSOAPContent) => {
+    try {
+      const updated = await AgentService.updateTempSOAP(tempId, { soap_content: content });
+      setActiveTempSOAP(updated);
+      setMessages(prev => prev.map(m => {
+        if (m.metadata?.temp_soap?.temp_id === tempId) {
+          return {
+            ...m,
+            metadata: {
+              ...m.metadata,
+              temp_soap: updated,
+            },
+          };
+        }
+        return m;
+      }));
+      return updated;
+    } catch (e) {
+      console.error('Failed to update temp soap:', e);
+      throw e;
+    }
+  }, []);
 
   const startNewSession = useCallback(() => {
     setActiveSessionId('');
     setMessages([]);
     setSteps([]);
+    setActiveTempSOAP(null);
   }, []);
 
   const renameSession = useCallback(async (sessionId: string, newTitle: string) => {
@@ -244,6 +349,7 @@ export function useAgentChat() {
     messages,
     executing,
     steps,
+    activeTempSOAP,
     loadPatients,
     loadSessions,
     loadSessionMessages,
@@ -254,5 +360,7 @@ export function useAgentChat() {
     sendAudio,
     reviewSOA,
     confirmSOA,
+    commitTempSOAP,
+    updateTempSOAP,
   };
 }

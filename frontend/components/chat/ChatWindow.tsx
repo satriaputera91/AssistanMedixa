@@ -21,6 +21,8 @@ interface ChatWindowProps {
   onSendAudio: (audio: File) => void;
   onReviewSOA: (noteId: string, content: SOAContent) => void;
   onConfirmSOA: (noteId: string, accept: boolean) => void;
+  onCommitTempSOAP?: (tempId: string) => Promise<any>;
+  onUpdateTempSOAP?: (tempId: string, content: any) => Promise<any>;
   patients?: PatientRecord[];
   selectedPatient?: string;
   onSelectPatient?: (patientId: string) => void;
@@ -28,8 +30,8 @@ interface ChatWindowProps {
 
 // FAQ for Active Patient Consultation (SIMRS MCP & EHR Data)
 const PATIENT_FAQS = [
-  { icon: '📋', label: '1. Ambil Informasi Riwayat Pasien', text: 'Ambil data profil demografi, riwayat penyakit kronis, rawat inap pasien dan riwayat catatan perkembangan medis S/O/A/P terakhir' },
-  { icon: '📝', label: '2. Ambil Data Anamnesis SIMRS', text: 'Tarik data anamnesis dari modul RME SIMRS.' },
+  { icon: '📋', label: '1. Ambil Informasi Demografi Pasien', text: 'Ambil data profil demografi pasien dari modul RME SIMRS.' },
+  { icon: '📝', label: '2. Ambil Anamnesis Sebelumnya', text: 'Tarik data anamnesis dari modul RME SIMRS.' },
   { icon: '🧪', label: '3. Evaluasi Hasil Lab & Pemeriksaan SIMRS', text: 'Evaluasi hasil laboratorium serial, nilai eGFR, rasio uACR, elektrolit, dan tanda vital dari pasien ini.' },
   { icon: '🎯', label: '4. Rekomendasi Diagnosis & ICD-10 Pasien', text: 'Berikan rekomendasi diagnosis kerja (primer) dan diagnosis banding lengkap beserta kodefikasi ICD-10 dan tingkat keyakinan.' },
   { icon: '💊', label: '5. Rekomendasi Terapi Obat Pasien Ini', text: 'Berikan rekomendasi rejimen obat lini pertama dan panduan penyesuaian dosis ginjal (Renal Dosing) pada pasien ini.' },
@@ -37,7 +39,7 @@ const PATIENT_FAQS = [
   { icon: '📖', label: '7. Penjelasan Patofisiologi Penyakit Pasien', text: 'Tampilkan penjelasan patofisiologi penyakit, kriteria diagnostik baku, dan tahapan klinis (staging) pada pasien ini.' },
   { icon: '🚨', label: '8. Deteksi Tanda Bahaya & Red Flags Pasien', text: 'Lakukan deteksi tanda bahaya klinis (clinical red flags), ambang kedaruratan, dan risiko komplikasi pada pasien ini.' },
   { icon: '🛡️', label: '9. Skrining Interaksi & Keamanan Obat Pasien', text: 'Lakukan skrining interaksi obat-ke-obat (DDI), kontraindikasi riwayat alergi silang, dan keamanan farmakologi pasien ini.' },
-  { icon: '📤', label: '10. Buat & Kirim CPPT S/O/A/P ke SIMRS', text: 'Buat resume catatan perkembangan pasien terintegrasi (CPPT / S-O-A-P) komprehensif dan kirim/sinkronisasikan ke modul RME SIMRS.' },
+  { icon: '📤', label: '10. Buat Draft CPPT S/O/A/P', text: 'Buat resume catatan perkembangan pasien terintegrasi (CPPT / S-O-A-P) dari data SOAP temp / konsultasi klinis dan kirim/sinkronisasikan ke modul RME SIMRS.' },
 ];
 
 // FAQ for General Medical Consultation (Knowledge Management, Guidelines, Drug Dosing, Literature)
@@ -61,6 +63,8 @@ export default function ChatWindow({
   onSendAudio,
   onReviewSOA,
   onConfirmSOA,
+  onCommitTempSOAP,
+  onUpdateTempSOAP,
   patients = [],
   selectedPatient = '',
   onSelectPatient,
@@ -77,6 +81,7 @@ export default function ChatWindow({
   const [activeCPPTEditIdx, setActiveCPPTEditIdx] = useState<number | null>(null);
   const [cpptModalOpen, setCpptModalOpen] = useState(false);
   const [cpptInitialContent, setCpptInitialContent] = useState<Partial<CPPTContent> | undefined>(undefined);
+  const [committingTempId, setCommittingTempId] = useState<string | null>(null);
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -314,23 +319,34 @@ export default function ChatWindow({
                 m.role === 'assistant' &&
                 !isNoPatientWarning &&
                 m.metadata?.type === 'soa_note' &&
-                m.metadata.note;
+                Boolean(m.metadata.note);
+
+              const isErrorMessage =
+                m.role === 'assistant' &&
+                (Boolean(m.metadata?.is_error) ||
+                  displayContent.includes('Error 500') ||
+                  displayContent.includes('kendala teknis') ||
+                  displayContent.startsWith('⚠️ Terjadi kendala') ||
+                  displayContent.startsWith('⚠️ Koneksi ke server'));
+
 
               return (
                 <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div
                     className={`max-w-3xl rounded-2xl p-5 ${m.role === 'user'
                       ? 'bg-emerald-600 text-white rounded-br-none shadow-md'
-                      : 'bg-white dark:bg-slate-900 border border-emerald-200 dark:border-slate-800 text-emerald-900 dark:text-slate-100 rounded-bl-none shadow-sm'
+                      : isErrorMessage
+                        ? 'bg-red-50/90 dark:bg-red-950/40 border border-red-300 dark:border-red-800 text-red-950 dark:text-red-200 rounded-bl-none shadow-sm'
+                        : 'bg-white dark:bg-slate-900 border border-emerald-200 dark:border-slate-800 text-emerald-900 dark:text-slate-100 rounded-bl-none shadow-sm'
                       }`}
                   >
                     <div className="text-[10px] opacity-80 mb-2 font-semibold uppercase tracking-wider flex items-center gap-1.5">
                       {m.role === 'user' ? (
                         <span>👤 Anda (Dokter)</span>
                       ) : (
-                        <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-bold">
+                        <span className={`flex items-center gap-1.5 font-bold ${isErrorMessage ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>
                           <BotAvatar size="sm" />
-                          <span>Asisten AI Medis</span>
+                          <span>{isErrorMessage ? 'Sistem AI Medis (Error)' : 'Asisten AI Medis'}</span>
                         </span>
                       )}
                       <span className="opacity-50">• {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -349,9 +365,44 @@ export default function ChatWindow({
                       <>
                         <MarkdownContent content={displayContent} />
 
+                        {/* Retry Button for Error 500 / Server Errors */}
+                        {isErrorMessage && (
+                          <div className="mt-3 pt-2.5 border-t border-red-200 dark:border-red-800/60 flex items-center justify-between flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (m.metadata?.retry_audio_file) {
+                                  onSendAudio(m.metadata.retry_audio_file);
+                                } else {
+                                  let retryQuery = m.metadata?.retry_query;
+                                  if (!retryQuery) {
+                                    for (let k = i - 1; k >= 0; k--) {
+                                      if (messages[k]?.role === 'user' && !messages[k]?.content.startsWith('[Rekaman Audio]')) {
+                                        retryQuery = messages[k].content;
+                                        break;
+                                      }
+                                    }
+                                  }
+                                  if (retryQuery) {
+                                    onSend(retryQuery);
+                                  }
+                                }
+                              }}
+                              disabled={executing}
+                              className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-xs active:scale-95 cursor-pointer"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                              </svg>
+                              <span>Coba Lagi (Retry)</span>
+                            </button>
+                          </div>
+                        )}
+
                         {/* Interactive Edit Button for Anamnesis Messages */}
-                        {isAnamnesisMessage && (
+                        {/* {isAnamnesisMessage && (
                           <div className="mt-3 pt-3 border-t border-emerald-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2">
+
                             <span className="text-[11px] text-emerald-700 dark:text-slate-400 flex items-center gap-1 font-semibold">
                               <span>📝</span>
                               <span>Data Anamnesis Klinis Pasien (RME SIMRS)</span>
@@ -365,10 +416,10 @@ export default function ChatWindow({
                               <span>Edit & Sesuaikan Tabel Anamnesis</span>
                             </button>
                           </div>
-                        )}
+                        )} */}
 
                         {/* Interactive Edit & Search ICD-10 Button for Diagnosis Messages */}
-                        {isDiagnosisMessage && (
+                        {/*isDiagnosisMessage && (
                           <div className="mt-3 pt-3 border-t border-emerald-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2">
                             <span className="text-[11px] text-emerald-700 dark:text-slate-400 flex items-center gap-1 font-semibold">
                               <span>🎯</span>
@@ -383,10 +434,10 @@ export default function ChatWindow({
                               <span>Edit & Cari Kode ICD-10</span>
                             </button>
                           </div>
-                        )}
+                        )*/}
 
                         {/* Interactive Edit & Search Medication Button for Therapy Messages */}
-                        {isMedicationMessage && (
+                        {/* {isMedicationMessage && (
                           <div className="mt-3 pt-3 border-t border-emerald-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2">
                             <span className="text-[11px] text-teal-700 dark:text-teal-400 flex items-center gap-1 font-semibold">
                               <span>💊</span>
@@ -401,26 +452,126 @@ export default function ChatWindow({
                               <span>Edit & Cari Rekomendasi Obat</span>
                             </button>
                           </div>
-                        )}
+                        )} */}
 
-                        {/* Interactive Edit & Confirm Button for CPPT / SOAP Messages */}
-                        {isCPPTMessage && (
-                          <div className="mt-3 pt-3 border-t border-emerald-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2">
-                            <span className="text-[11px] text-emerald-700 dark:text-slate-400 flex items-center gap-1 font-semibold">
-                              <span>📋</span>
-                              <span>Catatan Perkembangan Pasien Terintegrasi (CPPT / S-O-A-P)</span>
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const parsed = parseSOAPFromAIText(displayContent, messages);
-                                openCpptModal(parsed, i);
-                              }}
-                              className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-xs"
-                            >
-                              <span>✏️</span>
-                              <span>Edit & Konfirmasi CPPT ke SIMRS</span>
-                            </button>
+                        {/* Temporary SOAP & Audio Recording Card */}
+                        {m.metadata?.temp_soap && (
+                          <div className="mt-4 rounded-xl border border-emerald-300/90 dark:border-emerald-700/70 bg-gradient-to-br from-emerald-50/90 via-teal-50/40 to-white dark:from-slate-900 dark:via-slate-850 dark:to-slate-900 p-4 shadow-sm space-y-3.5 animate-in fade-in duration-200">
+                            {/* Header & Status */}
+                            <div className="flex items-center justify-between flex-wrap gap-2 pb-2.5 border-b border-emerald-200/70 dark:border-slate-800">
+                              <div className="flex items-center gap-2">
+                                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-600 text-white text-sm shadow-2xs">
+                                  💾
+                                </span>
+                                <div>
+                                  <h4 className="text-xs font-bold text-emerald-950 dark:text-emerald-200 flex items-center gap-1.5">
+                                    <span>Data SOAP Temp (Tersimpan di DB Aplikasi)</span>
+                                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono">
+                                      ({m.metadata.temp_soap.temp_id})
+                                    </span>
+                                  </h4>
+                                  <p className="text-[10px] text-emerald-700 dark:text-slate-400">
+                                    Sesi: {m.metadata.temp_soap.session_id} • DPJP: {m.metadata.temp_soap.doctor_name || 'Dokter'}
+                                  </p>
+                                </div>
+                              </div>
+                              <div>
+                                {m.metadata.temp_soap.status === 'synced_to_simrs' || m.metadata.temp_soap.simrs_sync_status === 'synced' ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold border border-emerald-300 dark:border-emerald-700 shadow-2xs">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                    <span>✅ Tersinkronisasi ke SIMRS</span>
+                                    {m.metadata.temp_soap.simrs_log_id && (
+                                      <span className="opacity-70 font-mono">({m.metadata.temp_soap.simrs_log_id})</span>
+                                    )}
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 text-[10px] font-bold border border-amber-300 dark:border-amber-700 shadow-2xs">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
+                                    <span>🟡 Draft Temp (Belum ke SIMRS)</span>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Audio Consultation Player */}
+                            {m.metadata.temp_soap.audio_url && (
+                              <div className="rounded-lg bg-white dark:bg-slate-800/90 border border-emerald-200 dark:border-slate-700 p-3 flex flex-col gap-2 shadow-2xs">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="font-semibold text-emerald-900 dark:text-slate-200 flex items-center gap-1.5">
+                                    <span>🎙️ Rekaman Suara Konsultasi:</span>
+                                    <span className="font-medium text-emerald-750 dark:text-emerald-300 truncate max-w-xs">{m.metadata.temp_soap.audio_filename}</span>
+                                  </span>
+                                  <span className="text-[10px] text-emerald-600 dark:text-slate-400 font-mono">
+                                    {m.metadata.temp_soap.audio_size_bytes ? `${Math.round(m.metadata.temp_soap.audio_size_bytes / 1024)} KB` : 'Audio WAV'}
+                                  </span>
+                                </div>
+                                <audio
+                                  controls
+                                  className="w-full h-8 accent-emerald-600 rounded"
+                                  src={m.metadata.temp_soap.audio_url.startsWith('http') || m.metadata.temp_soap.audio_url.startsWith('/api')
+                                    ? m.metadata.temp_soap.audio_url
+                                    : `/api/v1/agent/soap-temp/${m.metadata.temp_soap.temp_id}/audio`}
+                                  preload="metadata"
+                                >
+                                  Browser Anda tidak mendukung elemen pemutar audio.
+                                </audio>
+                              </div>
+                            )}
+
+                            {/* Action Buttons: Review & Send to SIMRS */}
+                            <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const sContent = m.metadata?.temp_soap?.soap_content;
+                                  const parsed = sContent ? {
+                                    subjective: sContent.subjective || '',
+                                    objective: sContent.objective || '',
+                                    assessment: sContent.assessment || '',
+                                    plan: sContent.plan || '',
+                                    instructions: sContent.instructions || '',
+                                  } : parseSOAPFromAIText(displayContent, messages, currentPatient);
+                                  openCpptModal(parsed, i);
+                                }}
+                                className="px-3.5 py-1.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-slate-750 text-emerald-800 dark:text-emerald-300 font-bold text-xs border border-emerald-300 dark:border-slate-700 flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
+                              >
+                                <span>✏️</span>
+                                <span>Tinjau & Edit SOAP Temp</span>
+                              </button>
+
+                              {m.metadata.temp_soap.status !== 'synced_to_simrs' && m.metadata.temp_soap.simrs_sync_status !== 'synced' && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    if (onCommitTempSOAP && m.metadata?.temp_soap?.temp_id) {
+                                      setCommittingTempId(m.metadata.temp_soap.temp_id);
+                                      try {
+                                        await onCommitTempSOAP(m.metadata.temp_soap.temp_id);
+                                      } finally {
+                                        setCommittingTempId(null);
+                                      }
+                                    }
+                                  }}
+                                  disabled={executing || committingTempId === m.metadata.temp_soap.temp_id}
+                                  className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-xs active:scale-95 cursor-pointer"
+                                >
+                                  {committingTempId === m.metadata.temp_soap.temp_id ? (
+                                    <>
+                                      <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                      </svg>
+                                      <span>Mengirim ke SIMRS...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span>🚀</span>
+                                      <span>Kirim & Sinkronkan ke SIMRS</span>
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </div>
                           </div>
                         )}
 
@@ -472,17 +623,42 @@ export default function ChatWindow({
                       key={idx}
                       type="button"
                       onClick={() => {
-                        if (p.label.includes('Buat & Kirim CPPT') && selectedPatient) {
+                        const isCpptFaq = /CPPT|SOAP|Draft|Draft CPPT/i.test(p.label);
+                        if (isCpptFaq && selectedPatient) {
                           let targetIdx: number | null = null;
-                          for (let idx = messages.length - 1; idx >= 0; idx--) {
-                            const c = messages[idx].content;
-                            if (c.includes('Resume Klinis (S-O-A-P)') || c.includes('Transkrip Percakapan Medis') || c.includes('Resume CPPT') || (c.includes('Subjective') && c.includes('Objective'))) {
-                              targetIdx = idx;
+                          let foundTempSoapContent: any = null;
+
+                          // 1. Check messages for active temp_soap
+                          for (let i = messages.length - 1; i >= 0; i--) {
+                            if (messages[i].metadata?.temp_soap?.soap_content) {
+                              targetIdx = i;
+                              foundTempSoapContent = messages[i].metadata?.temp_soap?.soap_content;
+                              break;
+                            }
+                          }
+
+                          if (foundTempSoapContent) {
+                            const parsed = {
+                              subjective: foundTempSoapContent.subjective || '',
+                              objective: foundTempSoapContent.objective || '',
+                              assessment: foundTempSoapContent.assessment || '',
+                              plan: foundTempSoapContent.plan || '',
+                              instructions: foundTempSoapContent.instructions || '',
+                            };
+                            openCpptModal(parsed, targetIdx);
+                            return;
+                          }
+
+                          // 2. Fallback search
+                          for (let i = messages.length - 1; i >= 0; i--) {
+                            const c = messages[i].content;
+                            if (c.includes('Resume Klinis (S-O-A-P)') || c.includes('Transkrip Percakapan Medis') || c.includes('Resume CPPT') || c.includes('Catatan Perkembangan Pasien Terintegrasi') || (c.includes('Subjective') && c.includes('Objective'))) {
+                              targetIdx = i;
                               break;
                             }
                           }
                           const initialText = targetIdx !== null ? (editedMessages[targetIdx] || messages[targetIdx].content) : '';
-                          const parsed = parseSOAPFromAIText(initialText, messages);
+                          const parsed = parseSOAPFromAIText(initialText, messages, currentPatient);
                           openCpptModal(parsed, targetIdx);
                           return;
                         }
@@ -508,17 +684,42 @@ export default function ChatWindow({
                       key={idx + 5}
                       type="button"
                       onClick={() => {
-                        if (p.label.includes('Buat & Kirim CPPT') && selectedPatient) {
+                        const isCpptFaq = /CPPT|SOAP|Draft|Draft CPPT/i.test(p.label);
+                        if (isCpptFaq && selectedPatient) {
                           let targetIdx: number | null = null;
-                          for (let idx = messages.length - 1; idx >= 0; idx--) {
-                            const c = messages[idx].content;
-                            if (c.includes('Resume Klinis (S-O-A-P)') || c.includes('Transkrip Percakapan Medis') || c.includes('Resume CPPT') || (c.includes('Subjective') && c.includes('Objective'))) {
-                              targetIdx = idx;
+                          let foundTempSoapContent: any = null;
+
+                          // 1. Check messages for active temp_soap
+                          for (let i = messages.length - 1; i >= 0; i--) {
+                            if (messages[i].metadata?.temp_soap?.soap_content) {
+                              targetIdx = i;
+                              foundTempSoapContent = messages[i].metadata?.temp_soap?.soap_content;
+                              break;
+                            }
+                          }
+
+                          if (foundTempSoapContent) {
+                            const parsed = {
+                              subjective: foundTempSoapContent.subjective || '',
+                              objective: foundTempSoapContent.objective || '',
+                              assessment: foundTempSoapContent.assessment || '',
+                              plan: foundTempSoapContent.plan || '',
+                              instructions: foundTempSoapContent.instructions || '',
+                            };
+                            openCpptModal(parsed, targetIdx);
+                            return;
+                          }
+
+                          // 2. Fallback search
+                          for (let i = messages.length - 1; i >= 0; i--) {
+                            const c = messages[i].content;
+                            if (c.includes('Resume Klinis (S-O-A-P)') || c.includes('Transkrip Percakapan Medis') || c.includes('Resume CPPT') || c.includes('Catatan Perkembangan Pasien Terintegrasi') || (c.includes('Subjective') && c.includes('Objective'))) {
+                              targetIdx = i;
                               break;
                             }
                           }
                           const initialText = targetIdx !== null ? (editedMessages[targetIdx] || messages[targetIdx].content) : '';
-                          const parsed = parseSOAPFromAIText(initialText, messages);
+                          const parsed = parseSOAPFromAIText(initialText, messages, currentPatient);
                           openCpptModal(parsed, targetIdx);
                           return;
                         }

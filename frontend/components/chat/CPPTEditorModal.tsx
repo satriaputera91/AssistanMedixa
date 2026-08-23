@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import type { PatientRecord } from '@/services/agent.service';
+import { AgentService, type PatientRecord } from '@/services/agent.service';
 import { ICD10_DATABASE } from './DiagnosisEditor';
 
 export interface CPPTContent {
@@ -35,10 +35,11 @@ function cleanMarkdown(raw: string): string {
     .trim();
 }
 
-// Function to dynamically parse SOAP components from AI generated recommendation markdown
+// Function to dynamically parse SOAP components from AI generated recommendation markdown and structured outputs
 export function parseSOAPFromAIText(
   content: string,
-  allMessages?: Array<{ role: string; content: string }>
+  allMessages?: Array<{ role: string; content: string; metadata?: Record<string, any> | null; structured_output?: any }>,
+  patient?: PatientRecord | null
 ): CPPTContent {
   let s = '';
   let o = '';
@@ -59,60 +60,188 @@ export function parseSOAPFromAIText(
     return '';
   };
 
+  // 0. Top Priority: Extract directly from Temporary SOAP (temp_soap) record in metadata
+  if (allMessages && allMessages.length > 0) {
+    for (let idx = allMessages.length - 1; idx >= 0; idx--) {
+      const msg = allMessages[idx];
+      const tempSoap = msg.metadata?.temp_soap;
+      if (tempSoap && tempSoap.soap_content) {
+        const sc = tempSoap.soap_content;
+        return {
+          subjective: sc.subjective || '',
+          objective: sc.objective || '',
+          assessment: sc.assessment || '',
+          plan: sc.plan || '',
+          instructions: sc.instructions || '',
+        };
+      }
+    }
+  }
+
+  // 1. Priority pass: Extract from structured Pydantic Output if available in allMessages
+  if (allMessages && allMessages.length > 0) {
+    for (let idx = allMessages.length - 1; idx >= 0; idx--) {
+      const msg = allMessages[idx];
+      const struct = (msg as any).structured_output || msg.metadata?.structured_output;
+      if (!struct) continue;
+
+      const soapObj = struct.soap || (struct.assessment && struct.subjective ? struct : null);
+
+      if (soapObj) {
+        // Subjective
+        if (!s && soapObj.subjective) {
+          const subj = soapObj.subjective;
+          const sLines: string[] = [];
+          if (subj.chief_complaint) sLines.push(`- Keluhan Utama: ${subj.chief_complaint}`);
+          if (subj.history_present_illness) sLines.push(`- Riwayat Penyakit Sekarang (RPS): ${subj.history_present_illness}`);
+          if (subj.past_medical_history) sLines.push(`- Riwayat Penyakit Dahulu (RPD): ${subj.past_medical_history}`);
+          if (subj.allergy_history) sLines.push(`- Riwayat Alergi: ${subj.allergy_history}`);
+          if (subj.medication_history) sLines.push(`- Riwayat Obat Rutin: ${subj.medication_history}`);
+          if (sLines.length > 0) s = sLines.join('\n');
+        }
+
+        // Objective
+        if (!o && soapObj.objective) {
+          const obj = soapObj.objective;
+          const oLines: string[] = [];
+          if (obj.vital_signs) {
+            const vs = obj.vital_signs;
+            const vsParts: string[] = [];
+            if (vs.blood_pressure) vsParts.push(`TD ${vs.blood_pressure}`);
+            if (vs.heart_rate) vsParts.push(`HR ${vs.heart_rate}`);
+            if (vs.respiratory_rate) vsParts.push(`RR ${vs.respiratory_rate}`);
+            if (vs.temperature) vsParts.push(`Suhu ${vs.temperature}`);
+            if (vs.spo2) vsParts.push(`SpO2 ${vs.spo2}`);
+            if (vsParts.length > 0) oLines.push(`- Tanda-Tanda Vital: ${vsParts.join(', ')}`);
+          }
+          if (obj.physical_examination) oLines.push(`- Pemeriksaan Fisik: ${obj.physical_examination}`);
+          if (Array.isArray(obj.laboratory_results) && obj.laboratory_results.length > 0) {
+            oLines.push(`- Evaluasi Laboratorium:`);
+            obj.laboratory_results.forEach((l: any) => {
+              const ref = l.reference_range ? ` [Rujukan: ${l.reference_range}]` : '';
+              oLines.push(`  • ${l.test_name}: ${l.value} ${l.unit || ''} (${l.status || 'Normal'})${ref}`);
+            });
+          }
+          if (oLines.length > 0) o = oLines.join('\n');
+        }
+
+        // Assessment
+        if (!a && soapObj.assessment) {
+          const ass = soapObj.assessment;
+          const aLines: string[] = [];
+          if (ass.primary_diagnosis) {
+            const pd = ass.primary_diagnosis;
+            const icd = pd.icd10 ? ` (ICD-10: ${pd.icd10})` : '';
+            const conf = pd.confidence ? ` [Keyakinan AI: ${Math.round(Number(pd.confidence) * (Number(pd.confidence) <= 1 ? 100 : 1))}%]` : '';
+            const note = pd.notes ? ` — ${pd.notes}` : '';
+            aLines.push(`- Diagnosis Primer (Kerja): ${pd.diagnosis}${icd}${conf}${note}`);
+          }
+          if (Array.isArray(ass.differential_diagnoses)) {
+            ass.differential_diagnoses.forEach((dd: any) => {
+              const icd = dd.icd10 ? ` (ICD-10: ${dd.icd10})` : '';
+              const conf = dd.confidence ? ` [Keyakinan AI: ${Math.round(Number(dd.confidence) * (Number(dd.confidence) <= 1 ? 100 : 1))}%]` : '';
+              const note = dd.notes || dd.clinical_clues ? ` — ${dd.notes || dd.clinical_clues}` : '';
+              aLines.push(`- Diagnosis Banding: ${dd.diagnosis}${icd}${conf}${note}`);
+            });
+          }
+          if (ass.clinical_reasoning) aLines.push(`- Penalaran Klinis: ${ass.clinical_reasoning}`);
+          if (aLines.length > 0) a = aLines.join('\n');
+        }
+
+        // Plan
+        if (!p && soapObj.plan) {
+          const pl = soapObj.plan;
+          const pLines: string[] = [];
+          if (Array.isArray(pl.medications) && pl.medications.length > 0) {
+            pLines.push(`- Rekomendasi Terapi Obat:`);
+            pl.medications.forEach((m: any) => {
+              const note = m.notes ? ` (${m.notes})` : '';
+              pLines.push(`  • ${m.drug_name} ${m.dosage || ''} ${m.frequency || ''} ${m.route || 'Oral'}${note}`);
+            });
+          }
+          if (Array.isArray(pl.diagnostic_workup) && pl.diagnostic_workup.length > 0) {
+            pLines.push(`- Pemeriksaan Penunjang: ${pl.diagnostic_workup.join(', ')}`);
+          }
+          if (Array.isArray(pl.clinical_procedures) && pl.clinical_procedures.length > 0) {
+            pLines.push(`- Prosedur / Tindakan Klinis: ${pl.clinical_procedures.join(', ')}`);
+          }
+          if (pl.follow_up) pLines.push(`- Rencana Kontrol / Tindak Lanjut: ${pl.follow_up}`);
+          if (pLines.length > 0) p = pLines.join('\n');
+        }
+
+        // Instructions
+        if (!i_inst) {
+          const iLines: string[] = [];
+          if (soapObj.plan?.patient_education && Array.isArray(soapObj.plan.patient_education)) {
+            soapObj.plan.patient_education.forEach((e: string) => iLines.push(`- Edukasi Pasien: ${e}`));
+          }
+          if (soapObj.red_flags && Array.isArray(soapObj.red_flags)) {
+            soapObj.red_flags.forEach((r: any) => {
+              iLines.push(`- Tanda Bahaya (Red Flag) [${r.severity || 'Peringatan'}]: ${r.title} — ${r.action_required}`);
+            });
+          }
+          if (iLines.length > 0) i_inst = iLines.join('\n');
+        }
+
+        if (s && o && a && p) break;
+      }
+    }
+  }
+
+  // 2. Parse from Content string
   if (content) {
-    // 1. Table row format (| **Subjective (S)** | ... |)
+    // A. Table row format (| **Subjective (S)** | ... |)
     const sTable = extractTableRow(content, /Subjective|👤\s*S\b|\bS\s*\(Subjective\)/i);
     const oTable = extractTableRow(content, /Objective|🔬\s*O\b|\bO\s*\(Objective\)/i);
     const aTable = extractTableRow(content, /Assessment|🎯\s*A\b|\bA\s*\(Assessment\)/i);
     const pTable = extractTableRow(content, /Plan|💊\s*P\b|\bP\s*\(Plan\)/i);
     const iTable = extractTableRow(content, /Instruksi|Instruction|📝\s*I\b|\bI\s*\(Instruksi\)/i);
 
-    if (sTable) s = sTable;
-    if (oTable) o = oTable;
-    if (aTable) a = aTable;
-    if (pTable) p = pTable;
-    if (iTable) i_inst = iTable;
+    if (sTable && !s) s = sTable;
+    if (oTable && !o) o = oTable;
+    if (aTable && !a) a = aTable;
+    if (pTable && !p) p = pTable;
+    if (iTable && !i_inst) i_inst = iTable;
 
-    // 2. Section headers format (### S — Subjective, ### S - Subjective, ### S (Subjective), ### S:, etc.)
+    // B. Section headers format (### 👤 S — Subjective, ### S — Subjective, etc.)
     if (!s) {
-      const sSec = content.match(/(?:###|\*\*)\s*(?:👤\s*)?(?:S\s*[—\-\(:\.]\s*Subjective\)?|Subjective|Hasil Anamnesis)[\s\S]*?(?=(?:###|\*\*)\s*(?:🔬\s*)?(?:O\s*[—\-\(:\.]\s*Objective\)?|Objective|Evaluasi Hasil Lab|Tanda Vital|###\s*🎯|###\s*💊|##\s*📋|$))/i);
+      const sSec = content.match(/(?:###|\*\*|##)\s*(?:👤\s*)?(?:S\s*[—\-:\.]\s*Subjective|Subjective|Hasil Anamnesis)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:🔬\s*)?(?:O\s*[—\-:\.]\s*Objective|Objective|Evaluasi Hasil Lab|Tanda Vital|🎯|💊|📋)|$)/i);
       if (sSec && sSec[0]) {
-        s = cleanMarkdown(sSec[0].replace(/^(?:###|\*\*).*?\n/i, ''));
+        s = cleanMarkdown(sSec[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
       }
     }
 
     if (!o) {
-      const oSec = content.match(/(?:###|\*\*)\s*(?:🔬\s*)?(?:O\s*[—\-\(:\.]\s*Objective\)?|Objective|Evaluasi Hasil Lab|Tanda Vital)[\s\S]*?(?=(?:###|\*\*)\s*(?:🎯\s*)?(?:A\s*[—\-\(:\.]\s*Assessment\)?|Assessment|Rekomendasi Diagnosis|###\s*💊|##\s*📋|$))/i);
+      const oSec = content.match(/(?:###|\*\*|##)\s*(?:🔬\s*)?(?:O\s*[—\-:\.]\s*Objective|Objective|Evaluasi Hasil Lab|Tanda Vital)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:🎯\s*)?(?:A\s*[—\-:\.]\s*Assessment|Assessment|Rekomendasi Diagnosis|💊|📋)|$)/i);
       if (oSec && oSec[0]) {
-        o = cleanMarkdown(oSec[0].replace(/^(?:###|\*\*).*?\n/i, ''));
+        o = cleanMarkdown(oSec[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
       }
     }
 
     if (!a) {
-      const aSec = content.match(/(?:###|\*\*)\s*(?:🎯\s*)?(?:A\s*[—\-\(:\.]\s*Assessment\)?|Assessment|Rekomendasi Diagnosis|Diagnosis Kerja)[\s\S]*?(?=(?:###|\*\*)\s*(?:💊\s*)?(?:P\s*[—\-\(:\.]\s*Plan\)?|Plan|Rekomendasi Terapi Obat|Rejimen|##\s*📋|$))/i);
+      const aSec = content.match(/(?:###|\*\*|##)\s*(?:🎯\s*)?(?:A\s*[—\-:\.]\s*Assessment|Assessment|Rekomendasi Diagnosis|Diagnosis Kerja)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:💊\s*)?(?:P\s*[—\-:\.]\s*Plan|Plan|Rekomendasi Terapi Obat|Rejimen|📋)|$)/i);
       if (aSec && aSec[0]) {
-        a = cleanMarkdown(aSec[0].replace(/^(?:###|\*\*).*?\n/i, ''));
+        a = cleanMarkdown(aSec[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
       }
     }
 
     if (!p) {
-      const pSec = content.match(/(?:###|\*\*)\s*(?:💊\s*)?(?:P\s*[—\-\(:\.]\s*Plan.*?|Plan|Rekomendasi Terapi Obat|Rejimen Farmakoterapi)[\s\S]*?(?=(?:###|\*\*)\s*(?:📝\s*)?(?:I\s*[—\-\(:\.]\s*Instruksi\)?|Instruksi|###\s*🛡️|---\n|\*\(⚠️|##\s*📋|$))/i);
+      const pSec = content.match(/(?:###|\*\*|##)\s*(?:💊\s*)?(?:P\s*[—\-:\.]\s*Plan.*?|Plan|Rekomendasi Terapi Obat|Rejimen Farmakoterapi)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:📝\s*)?(?:I\s*[—\-:\.]\s*Instruksi|Instruksi|Instruksi PPA|Instruksi Klinis|Edukasi Pasien|Tanda Bahaya|🛡️|📋)|---\n|\*\(⚠️|$)/i);
       if (pSec && pSec[0]) {
-        p = cleanMarkdown(pSec[0].replace(/^(?:###|\*\*).*?\n/i, ''));
+        p = cleanMarkdown(pSec[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
       }
     }
 
     if (!i_inst) {
-      const iSec = content.match(/(?:###|\*\*)\s*(?:📝\s*)?(?:I\s*[—\-\(:\.]\s*Instruksi\)?|Instruksi.*?|Instruksi PPA|Instruksi Klinis)[\s\S]*?(?=(?:###\s*🛡️|---\n|\*\(⚠️|##\s*📋|$))/i);
+      const iSec = content.match(/(?:###|\*\*|##)\s*(?:📝\s*)?(?:I\s*[—\-:\.]\s*Instruksi|Instruksi.*?|Instruksi PPA|Instruksi Klinis|Edukasi Pasien|Tanda Bahaya)[\s\S]*?(?=(?:###\s*🛡️|---\n|\*\(⚠️|##\s*📋|$))/i);
       if (iSec && iSec[0]) {
-        i_inst = cleanMarkdown(iSec[0].replace(/^(?:###|\*\*).*?\n/i, ''));
+        i_inst = cleanMarkdown(iSec[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
       }
     }
   }
 
   // 3. Scan previous assistant messages in the conversation (prioritize audio recordings / diarized summaries!)
-  if (allMessages && allMessages.length > 0) {
-    // First priority pass: Check if there is an audio diarized / SOAP note message
+  if (allMessages && allMessages.length > 0 && (!s || !o || !a || !p)) {
     for (let i = allMessages.length - 1; i >= 0; i--) {
       const msg = allMessages[i];
       if (msg.role !== 'assistant') continue;
@@ -121,58 +250,63 @@ export function parseSOAPFromAIText(
       if (
         t.includes('Resume Klinis (S-O-A-P)') ||
         t.includes('Transkrip Percakapan Medis') ||
-        (t.includes('S — Subjective') && t.includes('O — Objective'))
+        (t.includes('S — Subjective') && t.includes('O — Objective')) ||
+        t.includes('CPPT')
       ) {
-        const audioS = t.match(/(?:###|\*\*)\s*(?:👤\s*)?(?:S\s*[—\-\(:\.]\s*Subjective\)?|Subjective)[\s\S]*?(?=(?:###|\*\*)\s*(?:🔬\s*)?(?:O\s*[—\-\(:\.]\s*Objective\)?|Objective|###\s*🎯|###\s*💊|##\s*📋|$))/i);
-        const audioO = t.match(/(?:###|\*\*)\s*(?:🔬\s*)?(?:O\s*[—\-\(:\.]\s*Objective\)?|Objective)[\s\S]*?(?=(?:###|\*\*)\s*(?:🎯\s*)?(?:A\s*[—\-\(:\.]\s*Assessment\)?|Assessment|###\s*💊|##\s*📋|$))/i);
-        const audioA = t.match(/(?:###|\*\*)\s*(?:🎯\s*)?(?:A\s*[—\-\(:\.]\s*Assessment\)?|Assessment)[\s\S]*?(?=(?:###|\*\*)\s*(?:💊\s*)?(?:P\s*[—\-\(:\.]\s*Plan\)?|Plan|##\s*📋|$))/i);
-        const audioP = t.match(/(?:###|\*\*)\s*(?:💊\s*)?(?:P\s*[—\-\(:\.]\s*Plan.*?|Plan)[\s\S]*?(?=(?:###|\*\*)\s*(?:📝\s*)?(?:I\s*[—\-\(:\.]\s*Instruksi\)?|Instruksi|###\s*🛡️|---\n|\*\(⚠️|##\s*📋|$))/i);
-        const audioI = t.match(/(?:###|\*\*)\s*(?:📝\s*)?(?:I\s*[—\-\(:\.]\s*Instruksi\)?|Instruksi)[\s\S]*?(?=(?:###\s*🛡️|---\n|\*\(⚠️|##\s*📋|$))/i);
+        const audioS = t.match(/(?:###|\*\*|##)\s*(?:👤\s*)?(?:S\s*[—\-:\.]\s*Subjective|Subjective)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:🔬\s*)?(?:O\s*[—\-:\.]\s*Objective|Objective|🎯|💊|📋)|$)/i);
+        const audioO = t.match(/(?:###|\*\*|##)\s*(?:🔬\s*)?(?:O\s*[—\-:\.]\s*Objective|Objective)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:🎯\s*)?(?:A\s*[—\-:\.]\s*Assessment|Assessment|💊|📋)|$)/i);
+        const audioA = t.match(/(?:###|\*\*|##)\s*(?:🎯\s*)?(?:A\s*[—\-:\.]\s*Assessment|Assessment)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:💊\s*)?(?:P\s*[—\-:\.]\s*Plan|Plan|📋)|$)/i);
+        const audioP = t.match(/(?:###|\*\*|##)\s*(?:💊\s*)?(?:P\s*[—\-:\.]\s*Plan.*?|Plan)[\s\S]*?(?=(?:###|\*\*|##)\s*(?:📝\s*)?(?:I\s*[—\-:\.]\s*Instruksi|Instruksi|🛡️)|---\n|\*\(⚠️|##\s*📋|$)/i);
+        const audioI = t.match(/(?:###|\*\*|##)\s*(?:📝\s*)?(?:I\s*[—\-:\.]\s*Instruksi|Instruksi)[\s\S]*?(?=(?:###\s*🛡️|---\n|\*\(⚠️|##\s*📋|$))/i);
 
-        if (!s && audioS && audioS[0]) s = cleanMarkdown(audioS[0].replace(/^(?:###|\*\*).*?\n/i, ''));
-        if (!o && audioO && audioO[0]) o = cleanMarkdown(audioO[0].replace(/^(?:###|\*\*).*?\n/i, ''));
-        if (!a && audioA && audioA[0]) a = cleanMarkdown(audioA[0].replace(/^(?:###|\*\*).*?\n/i, ''));
-        if (!p && audioP && audioP[0]) p = cleanMarkdown(audioP[0].replace(/^(?:###|\*\*).*?\n/i, ''));
-        if (!i_inst && audioI && audioI[0]) i_inst = cleanMarkdown(audioI[0].replace(/^(?:###|\*\*).*?\n/i, ''));
+        if (!s && audioS && audioS[0]) s = cleanMarkdown(audioS[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
+        if (!o && audioO && audioO[0]) o = cleanMarkdown(audioO[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
+        if (!a && audioA && audioA[0]) a = cleanMarkdown(audioA[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
+        if (!p && audioP && audioP[0]) p = cleanMarkdown(audioP[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
+        if (!i_inst && audioI && audioI[0]) i_inst = cleanMarkdown(audioI[0].replace(/^(?:###|\*\*|##).*?\n/i, ''));
 
         if (s && o && a && p) break;
       }
     }
+  }
 
-    // Second fallback pass: scan individual clinical response tables
-    for (let i = allMessages.length - 1; i >= 0; i--) {
-      const msg = allMessages[i];
-      if (msg.role !== 'assistant') continue;
-      const t = msg.content;
-
-      if (!s && (t.includes('Hasil Anamnesis') || t.includes('Keluhan Utama') || t.includes('Riwayat Penyakit Sekarang'))) {
-        const sMatch = t.match(/##\s*📝\s*Hasil Anamnesis[\s\S]*?(?=(?:##|###\s*🎯|###\s*💊|$))/i);
-        if (sMatch) s = cleanMarkdown(sMatch[0]);
-      }
-
-      if (!o && (t.includes('Evaluasi Hasil Lab') || t.includes('Hasil Laboratorium') || t.includes('Tanda Vital') || t.includes('Pemeriksaan Penunjang'))) {
-        const oMatch = t.match(/###.*?(?:Evaluasi Hasil Lab|Hasil Laboratorium|Tanda-Tanda Vital)[\s\S]*?(?=(?:###|---\n|$))/i);
-        if (oMatch) o = cleanMarkdown(oMatch[0]);
-      }
-
-      if (!a && (t.includes('Diagnosis Kerja') || t.includes('Rekomendasi Diagnosis') || t.includes('ICD-10'))) {
-        const aMatch = t.match(/###.*?(?:Diagnosis Kerja|Rekomendasi Diagnosis)[\s\S]*?(?=(?:###|---\n|$))/i);
-        if (aMatch) a = cleanMarkdown(aMatch[0]);
-      }
-
-      if (!p && (t.includes('Rekomendasi Terapi Obat') || t.includes('Rejimen Farmakoterapi') || t.includes('Dosis'))) {
-        const pMatch = t.match(/###.*?(?:Rekomendasi Terapi Obat|Rejimen Farmakoterapi)[\s\S]*?(?=(?:###|---\n|$))/i);
-        if (pMatch) p = cleanMarkdown(pMatch[0]);
-      }
+  // 4. Fallback from patient record if still missing
+  if (!s && patient) {
+    const sParts: string[] = [];
+    if (patient.allergies && patient.allergies.length > 0) sParts.push(`- Riwayat Alergi: ${patient.allergies.join(', ')}`);
+    if (patient.current_medications && patient.current_medications.length > 0) {
+      sParts.push(`- Riwayat Obat Rutin: ${patient.current_medications.map(m => `${m.name} ${m.dosage || ''}`).join(', ')}`);
     }
+    if (patient.diagnoses && patient.diagnoses.length > 0) sParts.push(`- Riwayat Penyakit Dahulu: ${patient.diagnoses.join(', ')}`);
+    if (sParts.length > 0) s = sParts.join('\n');
+  }
+
+  if (!o && patient?.vitals && Object.keys(patient.vitals).length > 0) {
+    const v = patient.vitals as Record<string, string>;
+    const vitalsStr = [
+      v.bp || v.blood_pressure ? `TD ${v.bp || v.blood_pressure}` : '',
+      v.hr || v.heart_rate ? `HR ${v.hr || v.heart_rate}` : '',
+      v.rr || v.respiratory_rate ? `RR ${v.rr || v.respiratory_rate}` : '',
+      v.temp || v.temperature ? `Suhu ${v.temp || v.temperature}` : '',
+      v.spo2 ? `SpO2 ${v.spo2}` : ''
+    ].filter(Boolean).join(', ');
+    if (vitalsStr) o = `- Tanda Vital Pasien (SIMRS): ${vitalsStr}`;
+  }
+
+  if (!a && patient?.diagnoses && patient.diagnoses.length > 0) {
+    a = `- Diagnosis Primer (SIMRS): ${patient.diagnoses[0]}\n${patient.diagnoses.slice(1).map(d => `- Diagnosis Banding: ${d}`).join('\n')}`;
+  }
+
+  if (!p && patient?.current_medications && patient.current_medications.length > 0) {
+    p = `- Lanjutkan Terapi Rutin SIMRS:\n${patient.current_medications.map(m => `  • ${m.name} ${m.dosage || ''}`).join('\n')}\n- Kontrol poliklinik berkala.`;
   }
 
   return {
-    subjective: s || 'Keluhan dan riwayat yang dihasilkan oleh analisis AI.',
-    objective: o || 'Hasil evaluasi tanda vital dan data pemeriksaan objektif dari AI.',
-    assessment: a || 'Rekomendasi diagnosis kerja dan kodefikasi ICD-10 dari AI.',
-    plan: p || 'Rencana tata laksana, terapi obat, dan pemeriksaan lanjutan rekomendasi AI.',
-    instructions: i_inst || 'Edukasi kepatuhan minum obat teratur, kontrol poli berkala dalam 2-4 minggu, dan segera ke IGD jika muncul tanda bahaya (red flags).'
+    subjective: s || '',
+    objective: o || '',
+    assessment: a || '',
+    plan: p || '',
+    instructions: i_inst || ''
   };
 }
 
@@ -584,14 +718,6 @@ export function extractPatientPlanCategories(
   }
 
   const result = [];
-  if (patientItems.length > 0) {
-    result.push({
-      category: 'Rekomendasi Terapi & Plan AI Pasien Ini',
-      icon: '🌟',
-      items: patientItems,
-    });
-  }
-
   result.push(...PLAN_CATEGORIES);
   return result;
 }
@@ -777,6 +903,160 @@ export default function CPPTEditorModal({
     }
   };
 
+  // AI Diagnosis Workflow Generation State
+  const [isGeneratingDiagnosis, setIsGeneratingDiagnosis] = useState(false);
+  const [aiGeneratedDiagnoses, setAiGeneratedDiagnoses] = useState<Array<{
+    id: string;
+    type: 'primary' | 'differential';
+    diagnosis: string;
+    icd10: string;
+    confidence?: string | number;
+    justification?: string;
+    selected: boolean;
+  }>>([]);
+  const [aiGenError, setAiGenError] = useState<string | null>(null);
+  const [showAiDiagPanel, setShowAiDiagPanel] = useState(false);
+
+  const handleGenerateAIDiagnosis = async () => {
+    setIsGeneratingDiagnosis(true);
+    setAiGenError(null);
+    setShowAiDiagPanel(true);
+    try {
+      const pId = patient?.patient_id || 'P-001';
+      const res = await AgentService.executeChat({
+        user_query: 'Rekomendasi diagnosis kerja, diagnosis banding, dan kodefikasi ICD-10 pasien ini berdasarkan hasil pemeriksaan klinis, anamnesis, dan laboratorium SIMRS',
+        patient_id: pId,
+      });
+
+      const items: Array<{
+        id: string;
+        type: 'primary' | 'differential';
+        diagnosis: string;
+        icd10: string;
+        confidence?: string | number;
+        justification?: string;
+        selected: boolean;
+      }> = [];
+
+      const struct = res.structured_output as any;
+
+      // 1. Parse structured Pydantic output if available
+      if (struct?.assessment) {
+        if (struct.assessment.primary_diagnosis) {
+          const pd = struct.assessment.primary_diagnosis;
+          items.push({
+            id: `gen-prim-${Date.now()}-0`,
+            type: 'primary',
+            diagnosis: pd.diagnosis || 'Diagnosis Primer',
+            icd10: pd.icd10 || 'Unspecified',
+            confidence: pd.confidence ? `${Math.round(Number(pd.confidence) * (Number(pd.confidence) <= 1 ? 100 : 1))}%` : undefined,
+            justification: pd.notes || pd.justification,
+            selected: true,
+          });
+        }
+        if (Array.isArray(struct.assessment.differential_diagnoses)) {
+          struct.assessment.differential_diagnoses.forEach((dd: any, idx: number) => {
+            items.push({
+              id: `gen-diff-${Date.now()}-${idx + 1}`,
+              type: 'differential',
+              diagnosis: dd.diagnosis || 'Diagnosis Banding',
+              icd10: dd.icd10 || 'Unspecified',
+              confidence: dd.confidence ? `${Math.round(Number(dd.confidence) * (Number(dd.confidence) <= 1 ? 100 : 1))}%` : undefined,
+              justification: dd.notes || dd.clinical_clues || dd.justification,
+              selected: true,
+            });
+          });
+        }
+      }
+
+      // 2. Fallback: Parse from Markdown table synthesis
+      if (items.length === 0 && res.final_synthesis) {
+        const parsedCat = extractPatientDiagnosisCategories(patient, [
+          { role: 'assistant', content: res.final_synthesis }
+        ]);
+        parsedCat.primaryItems.forEach((p, idx) => {
+          items.push({
+            id: `gen-prim-${Date.now()}-${idx}`,
+            type: 'primary',
+            diagnosis: p.diagnosis,
+            icd10: p.icd10,
+            justification: p.justification,
+            selected: true,
+          });
+        });
+        parsedCat.diffItems.forEach((d, idx) => {
+          items.push({
+            id: `gen-diff-${Date.now()}-${idx}`,
+            type: 'differential',
+            diagnosis: d.diagnosis,
+            icd10: d.icd10,
+            justification: d.clues,
+            selected: true,
+          });
+        });
+      }
+
+      if (items.length === 0) {
+        setAiGenError('Tidak ada diagnosis spesifik yang diekstraksi dari respons AI.');
+      } else {
+        setAiGeneratedDiagnoses(items);
+      }
+    } catch (err: any) {
+      setAiGenError(err?.message || 'Gagal memanggil workflow rekomendasi diagnosis AI.');
+    } finally {
+      setIsGeneratingDiagnosis(false);
+    }
+  };
+
+  const handleToggleSelectAIDiag = (id: string) => {
+    setAiGeneratedDiagnoses(prev =>
+      prev.map(item => item.id === id ? { ...item, selected: !item.selected } : item)
+    );
+  };
+
+  const handleSelectAllAIDiag = (selectAll: boolean) => {
+    setAiGeneratedDiagnoses(prev =>
+      prev.map(item => ({ ...item, selected: selectAll }))
+    );
+  };
+
+  const handleInsertSelectedAIDiagnoses = () => {
+    const selectedItems = aiGeneratedDiagnoses.filter(d => d.selected);
+    if (selectedItems.length === 0) return;
+
+    const formattedLines = selectedItems.map(item => {
+      const isPrim = item.type === 'primary';
+      const typeLabel = isPrim ? 'Diagnosis Primer (Kerja)' : 'Diagnosis Banding';
+      const codePart = item.icd10 && item.icd10 !== 'Unspecified' ? ` (ICD-10: ${item.icd10})` : '';
+      const confPart = item.confidence ? ` [Keyakinan AI: ${item.confidence}]` : '';
+      const notePart = item.justification ? ` — ${isPrim ? 'Justifikasi' : 'Petunjuk'}: ${item.justification}` : '';
+      return `- ${typeLabel}: ${item.diagnosis}${codePart}${confPart}${notePart}`;
+    });
+
+    const newText = formattedLines.join('\n');
+    setAssessment(prev => {
+      const trimmed = prev.trim();
+      if (!trimmed) return newText;
+      return `${trimmed}\n${newText}`;
+    });
+  };
+
+  const handleInsertSingleAIDiag = (item: { type: string; diagnosis: string; icd10: string; confidence?: string | number; justification?: string }) => {
+    const isPrim = item.type === 'primary';
+    const typeLabel = isPrim ? 'Diagnosis Primer (Kerja)' : 'Diagnosis Banding';
+    const codePart = item.icd10 && item.icd10 !== 'Unspecified' ? ` (ICD-10: ${item.icd10})` : '';
+    const confPart = item.confidence ? ` [Keyakinan AI: ${item.confidence}]` : '';
+    const notePart = item.justification ? ` — ${isPrim ? 'Justifikasi' : 'Petunjuk'}: ${item.justification}` : '';
+    const itemText = `- ${typeLabel}: ${item.diagnosis}${codePart}${confPart}${notePart}`;
+
+    setAssessment(prev => {
+      const trimmed = prev.trim();
+      if (!trimmed) return itemText;
+      if (trimmed.includes(item.diagnosis)) return prev;
+      return `${trimmed}\n${itemText}`;
+    });
+  };
+
   const handleAppendDiagnosis = () => {
     if (!selectedDiagName.trim() && !selectedDiagCode.trim()) return;
     const isPrim = diagType === 'primary';
@@ -803,10 +1083,34 @@ export default function CPPTEditorModal({
     setShowDiagnosisModal(false);
   };
 
+
   const planCategories = React.useMemo(
     () => extractPatientPlanCategories(patient, messages?.map(m => ({ role: m.role, content: m.content }))),
     [patient, messages]
   );
+
+  const displayedPlanCategories = React.useMemo(() => {
+    if (selectedPlanCategory === 'all') return planCategories;
+    return planCategories.filter((c) => c.category === selectedPlanCategory);
+  }, [planCategories, selectedPlanCategory]);
+
+  const handleTogglePlanItem = (item: { label: string; text: string }) => {
+    const cleanText = item.text.replace(/^- /, '');
+    setPlan((prev) => {
+      const trimmed = prev.trim();
+      if (!trimmed) return item.text;
+      if (trimmed.includes(cleanText)) {
+        // Toggle off if already included
+        const filtered = trimmed
+          .split('\n')
+          .filter((line) => !line.includes(cleanText))
+          .join('\n')
+          .trim();
+        return filtered;
+      }
+      return `${trimmed}\n${item.text}`;
+    });
+  };
 
   const appendSubjectiveAnamnesis = (anamText: string) => {
     setSubjective((prev) => {
@@ -878,13 +1182,28 @@ export default function CPPTEditorModal({
   useEffect(() => {
     if (!isOpen) return;
 
-    // Populate strictly from AI generated recommendations (initialContent)
-    setSubjective(initialContent?.subjective || '');
-    setObjective(initialContent?.objective || '');
-    setAssessment(initialContent?.assessment || '');
-    setPlan(initialContent?.plan || '');
-    setInstructions(initialContent?.instructions || '');
-  }, [isOpen, initialContent]);
+    let s = initialContent?.subjective || '';
+    let o = initialContent?.objective || '';
+    let a = initialContent?.assessment || '';
+    let p = initialContent?.plan || '';
+    let inst = initialContent?.instructions || '';
+
+    // If any section is missing or empty, extract from messages/patient
+    if (!s || !o || !a || !p) {
+      const parsed = parseSOAPFromAIText('', messages, patient);
+      if (!s) s = parsed.subjective;
+      if (!o) o = parsed.objective;
+      if (!a) a = parsed.assessment;
+      if (!p) p = parsed.plan;
+      if (!inst) inst = parsed.instructions || '';
+    }
+
+    setSubjective(s);
+    setObjective(o);
+    setAssessment(a);
+    setPlan(p);
+    setInstructions(inst);
+  }, [isOpen, initialContent, messages, patient]);
 
   if (!isOpen) return null;
 
@@ -1100,7 +1419,7 @@ export default function CPPTEditorModal({
               <textarea
                 value={subjective}
                 onChange={(e) => setSubjective(e.target.value)}
-                rows={4}
+                rows={6}
                 className="w-full rounded-xl border border-emerald-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-xs leading-relaxed text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                 placeholder="Masukkan data anamnesis: keluhan utama, riwayat penyakit sekarang (RPS), riwayat penyakit dahulu (RPD), riwayat alergi dan pengobatan..."
               />
@@ -1232,7 +1551,7 @@ export default function CPPTEditorModal({
               <textarea
                 value={objective}
                 onChange={(e) => setObjective(e.target.value)}
-                rows={5}
+                rows={6}
                 className="w-full rounded-xl border border-teal-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-xs leading-relaxed text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-teal-500/50 font-mono"
                 placeholder="Masukkan data observasi klinis, pemeriksaan fisik, tanda-tanda vital (TTV: TD, HR, RR, Suhu, SpO2), dan hasil laboratorium serial..."
               />
@@ -1262,87 +1581,78 @@ export default function CPPTEditorModal({
                 </div>
               </div>
 
-              {/* Quick AI & SIMRS Diagnosis Chips */}
-              {(diagnosisCategories.primaryItems.length > 0 || diagnosisCategories.diffItems.length > 0) && (
-                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-700 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-blue-900 dark:text-blue-300 flex items-center gap-1">
-                      <span>🎯</span>
-                      <span>Rekomendasi Diagnosis AI / SIMRS (Klik untuk langsung menyisipkan):</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowDiagnosisModal(true)}
-                      className="text-[10px] text-blue-600 dark:text-blue-400 font-bold hover:underline cursor-pointer"
-                    >
-                      Cari Kode Lainnya 🔍
-                    </button>
+              {/* AI Diagnosis Generated Workflow Results Panel */}
+              {showAiDiagPanel && (
+                <div className="p-3.5 rounded-xl bg-linear-to-r from-blue-500/10 via-indigo-500/10 to-teal-500/10 border border-blue-300 dark:border-blue-700 space-y-2.5">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm">✨</span>
+                      <span className="text-xs font-bold text-blue-950 dark:text-blue-200">
+                        Hasil Rekomendasi Diagnosis AI Co-Pilot
+                      </span>
+                      {isGeneratingDiagnosis && (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-blue-600 dark:text-blue-400 font-semibold animate-pulse">
+                          <span className="w-2.5 h-2.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></span>
+                          Menganalisis EMR SIMRS...
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {aiGeneratedDiagnoses.length > 0 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectAllAIDiag(true)}
+                            className="text-[10px] text-blue-700 dark:text-blue-300 hover:underline font-semibold cursor-pointer"
+                          >
+                            Pilih Semua
+                          </button>
+                          <span className="text-slate-300 dark:text-slate-600">|</span>
+                          <button
+                            type="button"
+                            onClick={() => handleSelectAllAIDiag(false)}
+                            className="text-[10px] text-slate-500 dark:text-slate-400 hover:underline font-medium cursor-pointer"
+                          >
+                            Batal Pilih
+                          </button>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowAiDiagPanel(false)}
+                        className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs px-1 font-bold cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {diagnosisCategories.primaryItems.map((item, idx) => {
-                      const itemText = `- Diagnosis Primer (Kerja): ${item.diagnosis} (ICD-10: ${item.icd10})${item.justification ? ` — Justifikasi: ${item.justification}` : ''}`;
-                      const isAdded = assessment.includes(item.diagnosis) || (item.icd10 !== 'Unspecified' && assessment.includes(item.icd10));
-                      return (
-                        <button
-                          key={`prim-${idx}`}
-                          type="button"
-                          onClick={() => {
-                            if (!isAdded) {
-                              setAssessment((prev) => {
-                                const trimmed = prev.trim();
-                                if (!trimmed) return itemText;
-                                return `${trimmed}\n${itemText}`;
-                              });
-                            }
-                          }}
-                          className={`px-2 py-1 rounded-lg text-[10px] font-medium border flex items-center gap-1.5 transition-all cursor-pointer ${isAdded
-                            ? 'bg-blue-100 dark:bg-blue-950/60 border-blue-300 dark:border-blue-700 text-blue-800 dark:text-blue-300'
-                            : 'bg-blue-50/70 dark:bg-slate-800 border-blue-200 dark:border-slate-700 text-blue-950 dark:text-blue-200 hover:bg-blue-100 hover:border-blue-400'
-                            }`}
-                        >
-                          <span className="font-bold text-[9px] px-1 py-0.5 rounded bg-blue-600 text-white shrink-0">Primer</span>
-                          <span className="font-bold font-mono">{item.icd10}</span>
-                          <span className="truncate max-w-[200px]">{item.diagnosis}</span>
-                          <span className="text-[11px] font-bold shrink-0">{isAdded ? '✓' : '+'}</span>
-                        </button>
-                      );
-                    })}
-                    {diagnosisCategories.diffItems.map((item, idx) => {
-                      const itemText = `- Diagnosis Banding: ${item.diagnosis} (ICD-10: ${item.icd10})${item.clues ? ` — Petunjuk: ${item.clues}` : ''}`;
-                      const isAdded = assessment.includes(item.diagnosis) || (item.icd10 !== 'Unspecified' && assessment.includes(item.icd10));
-                      return (
-                        <button
-                          key={`diff-${idx}`}
-                          type="button"
-                          onClick={() => {
-                            if (!isAdded) {
-                              setAssessment((prev) => {
-                                const trimmed = prev.trim();
-                                if (!trimmed) return itemText;
-                                return `${trimmed}\n${itemText}`;
-                              });
-                            }
-                          }}
-                          className={`px-2 py-1 rounded-lg text-[10px] font-medium border flex items-center gap-1.5 transition-all cursor-pointer ${isAdded
-                            ? 'bg-amber-100 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300'
-                            : 'bg-amber-50/70 dark:bg-slate-800 border-amber-200 dark:border-slate-700 text-amber-950 dark:text-amber-200 hover:bg-amber-100 hover:border-amber-400'
-                            }`}
-                        >
-                          <span className="font-bold text-[9px] px-1 py-0.5 rounded bg-amber-600 text-white shrink-0">Banding</span>
-                          <span className="font-bold font-mono">{item.icd10}</span>
-                          <span className="truncate max-w-[200px]">{item.diagnosis}</span>
-                          <span className="text-[11px] font-bold shrink-0">{isAdded ? '✓' : '+'}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+
+                  {aiGenError && (
+                    <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-[11px] text-red-700 dark:text-red-300 flex items-center justify-between flex-wrap gap-2">
+                      <span>⚠️ {aiGenError}</span>
+                      <button
+                        type="button"
+                        onClick={handleGenerateAIDiagnosis}
+                        disabled={isGeneratingDiagnosis}
+                        className="px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-bold text-[10px] flex items-center gap-1 transition-all shadow-xs cursor-pointer active:scale-95"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        <span>Coba Lagi (Retry)</span>
+                      </button>
+                    </div>
+                  )}
+
+
+
                 </div>
               )}
 
               <textarea
                 value={assessment}
                 onChange={(e) => setAssessment(e.target.value)}
-                rows={4}
+                rows={6}
                 className="w-full rounded-xl border border-blue-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-xs leading-relaxed text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-mono"
                 placeholder="Tuliskan diagnosis kerja dan diagnosis banding lengkap dengan kodefikasi ICD-10..."
               />
@@ -1361,116 +1671,113 @@ export default function CPPTEditorModal({
                   <button
                     type="button"
                     onClick={() => setShowPlanPicker(!showPlanPicker)}
-                    className="px-2.5 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-xs"
+                    className="px-2.5 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-xs active:scale-95 cursor-pointer"
                   >
                     <span>{showPlanPicker ? '✕' : '➕'}</span>
-                    <span>{showPlanPicker ? 'Tutup Panel Plan' : 'Tambah Rekomendasi Plan AI'}</span>
+                    <span>{showPlanPicker ? 'Tutup Panel Plan' : 'Template & Kustom Plan'}</span>
                   </button>
                 </div>
               </div>
 
-              {/* Interactive Plan & AI Therapy Quick-Insert Picker */}
+              {/* Interactive Plan Template & Custom Doctor Input Panel */}
               {showPlanPicker && (
-                <div className="p-3.5 rounded-2xl border border-indigo-200/90 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 space-y-3 shadow-xs animate-in fade-in-50 duration-150">
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <span className="text-[11px] font-bold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
-                      <span>💡</span>
-                      <span>Katalog Rekomendasi Terapi Obat, Workup, & Plan AI:</span>
+                <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-indigo-300 dark:border-slate-700 shadow-sm space-y-3 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="flex items-center justify-between border-b border-indigo-100 dark:border-slate-800 pb-2">
+                    <span className="text-xs font-bold text-indigo-950 dark:text-indigo-300 flex items-center gap-1.5">
+                      <span>💊</span>
+                      <span>Katalog Template Plan & Terapi Klinis (Klik untuk Memilih/Menyisipkan)</span>
                     </span>
-                    <span className="text-[10px] text-indigo-600 dark:text-slate-400">
-                      Klik badge untuk menyisipkan ke Plan
-                    </span>
-                  </div>
-
-                  {/* Filter Category Pills */}
-                  <div className="flex flex-wrap gap-1.5 border-b border-indigo-100 dark:border-slate-800 pb-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedPlanCategory('all')}
-                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all ${selectedPlanCategory === 'all'
-                        ? 'bg-indigo-600 text-white shadow-2xs'
-                        : 'bg-indigo-50 dark:bg-slate-800 text-indigo-900 dark:text-indigo-300 hover:bg-indigo-100'
-                        }`}
-                    >
-                      Semua Kategori
-                    </button>
-                    {planCategories.map((c) => (
+                    <div className="flex items-center gap-1 overflow-x-auto max-w-[65%] py-0.5">
                       <button
-                        key={c.category}
                         type="button"
-                        onClick={() => setSelectedPlanCategory(c.category)}
-                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 ${selectedPlanCategory === c.category
+                        onClick={() => setSelectedPlanCategory('all')}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all shrink-0 ${selectedPlanCategory === 'all'
                           ? 'bg-indigo-600 text-white shadow-2xs'
-                          : c.category.includes('Pasien Ini')
-                            ? 'bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700'
-                            : 'bg-indigo-50 dark:bg-slate-800 text-indigo-900 dark:text-indigo-300 hover:bg-indigo-100'
+                          : 'bg-indigo-50 dark:bg-slate-800 text-indigo-800 dark:text-slate-300 hover:bg-indigo-100 dark:hover:bg-slate-700'
                           }`}
                       >
-                        <span>{c.icon}</span>
-                        <span>{c.category}</span>
+                        Semua
                       </button>
+                      {planCategories.map((c) => (
+                        <button
+                          key={c.category}
+                          type="button"
+                          onClick={() => setSelectedPlanCategory(c.category)}
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all shrink-0 flex items-center gap-1 ${selectedPlanCategory === c.category
+                            ? 'bg-indigo-600 text-white shadow-2xs'
+                            : c.category.includes('Pasien Ini') || c.category.includes('AI')
+                              ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
+                              : 'bg-indigo-50 dark:bg-slate-800 text-indigo-800 dark:text-slate-300 hover:bg-indigo-100 dark:hover:bg-slate-700'
+                            }`}
+                        >
+                          <span>{c.icon}</span>
+                          <span>{c.category.split(' ')[0] || c.category}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Plan Items List */}
+                  <div className="max-h-56 overflow-y-auto space-y-3 pr-1">
+                    {displayedPlanCategories.map((cat) => (
+                      <div key={cat.category} className="space-y-1.5">
+                        <div className="text-[11px] font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1">
+                          <span>{cat.icon}</span>
+                          <span>{cat.category}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {cat.items.map((item, idx) => {
+                            const cleanText = item.text.replace(/^- /, '');
+                            const isAlreadyIncluded = plan.includes(cleanText) || (item.label && plan.includes(item.label));
+                            return (
+                              <button
+                                key={`${item.label}-${idx}`}
+                                type="button"
+                                onClick={() => handleTogglePlanItem(item)}
+                                className={`px-2.5 py-1.5 rounded-xl text-[11px] font-medium border text-left flex items-center gap-1.5 transition-all cursor-pointer ${isAlreadyIncluded
+                                  ? 'bg-indigo-100 dark:bg-indigo-950/70 border-indigo-400 dark:border-indigo-600 text-indigo-950 dark:text-indigo-200 font-bold shadow-2xs'
+                                  : cat.category.includes('Pasien Ini') || cat.category.includes('AI')
+                                    ? 'bg-amber-50/80 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900 border-amber-300 dark:border-amber-700 text-amber-950 dark:text-amber-200 hover:scale-[1.01]'
+                                    : 'bg-indigo-50/70 dark:bg-slate-800/80 hover:bg-indigo-100 dark:hover:bg-slate-700 border-indigo-200 dark:border-slate-700 text-indigo-950 dark:text-slate-200 hover:scale-[1.01]'
+                                  }`}
+                              >
+                                <span className={`font-bold ${isAlreadyIncluded ? 'text-indigo-700 dark:text-indigo-300' : 'text-indigo-500'}`}>
+                                  {isAlreadyIncluded ? '✓' : '+'}
+                                </span>
+                                <span>{item.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     ))}
                   </div>
 
-                  {/* Plan Items Grid */}
-                  <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
-                    {planCategories
-                      .filter((c) => selectedPlanCategory === 'all' || selectedPlanCategory === c.category)
-                      .map((cat) => (
-                        <div key={cat.category} className="space-y-1">
-                          <div className="text-[10px] font-bold text-indigo-800 dark:text-indigo-300 uppercase tracking-wider flex items-center gap-1">
-                            <span>{cat.icon}</span>
-                            <span>{cat.category}</span>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {cat.items.map((item, idx) => {
-                              const isAlreadyIncluded = plan.includes(item.text.trim());
-                              return (
-                                <button
-                                  key={idx}
-                                  type="button"
-                                  onClick={() => appendPlanItem(item.text)}
-                                  className={`px-2.5 py-1 rounded-xl text-[11px] font-medium border text-left flex items-center gap-1.5 transition-all ${isAlreadyIncluded
-                                    ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300 font-semibold'
-                                    : cat.category.includes('Pasien Ini')
-                                      ? 'bg-amber-50/80 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900 border-amber-300 dark:border-amber-700 text-amber-950 dark:text-amber-200 hover:scale-[1.01]'
-                                      : 'bg-indigo-50/70 dark:bg-slate-800/80 hover:bg-indigo-100 dark:hover:bg-slate-700 border-indigo-200 dark:border-slate-700 text-indigo-950 dark:text-slate-200 hover:scale-[1.01]'
-                                    }`}
-                                >
-                                  <span>{isAlreadyIncluded ? '✓' : '+'}</span>
-                                  <span>{item.label}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-
-                  {/* Custom Plan Adder */}
+                  {/* Custom Plan Doctor Input Section */}
                   <div className="pt-2 border-t border-indigo-100 dark:border-slate-800 flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-bold text-indigo-800 dark:text-indigo-400 shrink-0">
-                      Plan Kustom:
+                    <span className="text-[10px] font-bold text-indigo-900 dark:text-indigo-300 shrink-0 flex items-center gap-1">
+                      <span>✏️</span>
+                      <span>Plan Kustom Dokter:</span>
                     </span>
                     <input
                       type="text"
                       value={customPlanLabel}
                       onChange={(e) => setCustomPlanLabel(e.target.value)}
-                      placeholder="Kategori / Judul (cth: Profil Besi / EGD Ulang)"
-                      className="px-2.5 py-1 text-xs rounded-lg border border-indigo-200 dark:border-slate-700 bg-indigo-50/40 dark:bg-slate-800 text-slate-900 dark:text-slate-100 flex-1 min-w-[140px] focus:outline-none focus:border-indigo-500"
+                      placeholder="Kategori / Label (cth: Obat / Lab / Terapi)"
+                      className="px-2.5 py-1 text-xs rounded-lg border border-indigo-200 dark:border-slate-700 bg-indigo-50/40 dark:bg-slate-800 text-slate-900 dark:text-slate-100 w-36 sm:w-44 focus:outline-none focus:border-indigo-500"
                     />
                     <input
                       type="text"
                       value={customPlanValue}
                       onChange={(e) => setCustomPlanValue(e.target.value)}
-                      placeholder="Instruksi Rencana / Terapi (cth: LFT & Elektrolit 3 hari lagi)"
-                      className="px-2.5 py-1 text-xs rounded-lg border border-indigo-200 dark:border-slate-700 bg-indigo-50/40 dark:bg-slate-800 text-slate-900 dark:text-slate-100 flex-1 min-w-[160px] focus:outline-none focus:border-indigo-500"
+                      placeholder="Uraian Rencana Terapi / Resep / Dosis / Tindakan..."
+                      className="px-2.5 py-1 text-xs rounded-lg border border-indigo-200 dark:border-slate-700 bg-indigo-50/40 dark:bg-slate-800 text-slate-900 dark:text-slate-100 flex-1 min-w-[180px] focus:outline-none focus:border-indigo-500"
                     />
                     <button
                       type="button"
                       onClick={handleAddCustomPlan}
                       disabled={!customPlanLabel.trim() && !customPlanValue.trim()}
-                      className="px-3 py-1 rounded-lg bg-indigo-700 hover:bg-indigo-600 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-2xs shrink-0"
+                      className="px-3.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-2xs shrink-0 cursor-pointer active:scale-95"
                     >
                       + Sisipkan
                     </button>
@@ -1481,7 +1788,7 @@ export default function CPPTEditorModal({
               <textarea
                 value={plan}
                 onChange={(e) => setPlan(e.target.value)}
-                rows={4}
+                rows={6}
                 className="w-full rounded-xl border border-indigo-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-xs leading-relaxed text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
                 placeholder="Tuliskan instruksi obat, dosis, rencana pemeriksaan penunjang, dan instruksi kontrol..."
               />
@@ -1602,7 +1909,7 @@ export default function CPPTEditorModal({
               <textarea
                 value={instructions}
                 onChange={(e) => setInstructions(e.target.value)}
-                rows={3}
+                rows={6}
                 className="w-full rounded-xl border border-purple-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2.5 text-xs leading-relaxed text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
                 placeholder="Masukkan instruksi medis: pemantauan TTV berkala, diet nutrisi khusus, jadwal kontrol ulang, edukasi tanda bahaya (red flags)..."
               />
@@ -1640,7 +1947,7 @@ export default function CPPTEditorModal({
               ) : (
                 <>
                   <span>✅</span>
-                  <span>Konfirmasi & Kirim ke SIMRS (MCP)</span>
+                  <span>Konfirmasi & Kirim ke SIMRS</span>
                 </>
               )}
             </button>
@@ -1721,56 +2028,6 @@ export default function CPPTEditorModal({
 
               {/* Modal Body / Results List */}
               <div className="p-4 overflow-y-auto space-y-3 flex-1 max-h-[36vh]">
-                {/* AI / Patient Recommended Section */}
-                {(diagnosisCategories.primaryItems.length > 0 || diagnosisCategories.diffItems.length > 0) && !diagSearchQuery && diagCategoryFilter === 'Semua' && (
-                  <div className="p-3 rounded-2xl bg-blue-50/70 dark:bg-slate-800/80 border border-blue-200 dark:border-slate-700 space-y-2">
-                    <div className="text-[10px] font-bold text-blue-900 dark:text-blue-300 flex items-center gap-1 uppercase tracking-wider">
-                      <span>🌟</span>
-                      <span>Rekomendasi Diagnosis Sesi Ini (AI & RME Pasien):</span>
-                    </div>
-                    <div className="space-y-1.5">
-                      {diagnosisCategories.primaryItems.map((item, idx) => (
-                        <div
-                          key={`rec-p-${idx}`}
-                          onClick={() => handleSelectIcd10Item({ code: item.icd10, name: item.diagnosis, indonesian: item.diagnosis }, 'primary', item.justification)}
-                          className={`p-2 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-all ${selectedDiagCode === item.icd10 && diagType === 'primary'
-                            ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                            : 'bg-white dark:bg-slate-900 border-blue-200 dark:border-slate-700 hover:border-blue-400 text-slate-800 dark:text-slate-200'
-                            }`}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-700 shrink-0">
-                              Primer
-                            </span>
-                            <span className="font-mono font-bold text-xs shrink-0">{item.icd10}</span>
-                            <span className="text-xs font-semibold truncate">{item.diagnosis}</span>
-                          </div>
-                          <span className="text-[10px] font-bold shrink-0 opacity-80">Pilih 👉</span>
-                        </div>
-                      ))}
-                      {diagnosisCategories.diffItems.map((item, idx) => (
-                        <div
-                          key={`rec-d-${idx}`}
-                          onClick={() => handleSelectIcd10Item({ code: item.icd10, name: item.diagnosis, indonesian: item.diagnosis }, 'differential', item.clues)}
-                          className={`p-2 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-all ${selectedDiagCode === item.icd10 && diagType === 'differential'
-                            ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
-                            : 'bg-white dark:bg-slate-900 border-amber-200 dark:border-slate-700 hover:border-amber-400 text-slate-800 dark:text-slate-200'
-                            }`}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 shrink-0">
-                              Banding
-                            </span>
-                            <span className="font-mono font-bold text-xs shrink-0">{item.icd10}</span>
-                            <span className="text-xs font-semibold truncate">{item.diagnosis}</span>
-                          </div>
-                          <span className="text-[10px] font-bold shrink-0 opacity-80">Pilih 👉</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 {/* ICD-10 Database Results */}
                 <div className="space-y-1.5">
                   <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center justify-between px-1">
@@ -1948,6 +2205,6 @@ export default function CPPTEditorModal({
         )}
 
       </div>
-    </div>
+    </div >
   );
 }

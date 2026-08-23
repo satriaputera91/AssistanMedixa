@@ -5,9 +5,10 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.141+-009688.svg?style=for-the-badge&logo=FastAPI&logoColor=white)](https://fastapi.tiangolo.com)
 [![LangGraph](https://img.shields.io/badge/LangGraph-Agentic_Workflow-FF6F00.svg?style=for-the-badge&logo=LangChain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
 [![Google Gemini](https://img.shields.io/badge/Google_Gemini-2.0_Flash-4285F4.svg?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
+[![Qdrant](https://img.shields.io/badge/Qdrant-Vector_RAG-DC2626.svg?style=for-the-badge&logo=qdrant&logoColor=white)](https://qdrant.tech/)
 [![Next.js](https://img.shields.io/badge/Next.js-14_App_Router-000000.svg?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5+-3178C6.svg?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4+-38B2AC.svg?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
+[![Version](https://img.shields.io/badge/Release-v1.3.0-blue.svg?style=for-the-badge)](VERSION_NOTES.md)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
 
 **Platform Asisten Klinis AI Berbasis Agentic Architecture (FastAPI, LangGraph, Model Context Protocol & Google Gemini)**
@@ -17,6 +18,7 @@
 [Struktur Direktori](#-struktur-direktori) •
 [Instalasi & Penggunaan](#-instalasi--penggunaan) •
 [API Reference](#-api-reference) •
+[Version Notes](VERSION_NOTES.md) •
 [Disclaimer Medis](#-disclaimer-medis)
 
 </div>
@@ -34,20 +36,26 @@ Sistem dibangun dengan arsitektur **Modular Monolith** berkinerja tinggi, mengin
 ## ✨ Fitur Utama
 
 - 🧠 **Autonomous Medical Agent (LangGraph)**
-  - State machine workflow terstruktur: Anamnesis → Differential Diagnosis → SOAP/CPPT Generation → Medication Recommendation → Safety Guardrail Verification.
+  - State machine workflow terstruktur: Anamnesis → Differential Diagnosis → SOAP/CPPT Generation → Medication Recommendation → Red Flags Detection → Safety Guardrail Verification.
   - Streaming respons real-time (Server-Sent Events) dengan visualisasi langkah penalaran AI.
 - 🔌 **Model Context Protocol (MCP) untuk SIMRS**
   - Standardized tool integration untuk membaca riwayat rekam medis (EMR), hasil laboratorium, alergi obat, dan stok farmasi rumah sakit.
-- 📚 **Clinical Knowledge RAG Engine**
-  - Mesin pencarian semantik panduan praktik klinis (PPK), formularium nasional, dan basis pengetahuan interaksi obat menggunakan **Qdrant** dan **Gemini Embeddings**.
-- 🎙️ **Multimodal Audio Consultation (Speech-to-Text)**
+- 📚 **Clinical Knowledge Vector RAG Engine (Qdrant)**
+  - Mesin pencarian semantik panduan praktik klinis (PPK), formularium nasional, diagnosis kerja, dan basis pengetahuan interaksi obat menggunakan **Qdrant Vector DB** dan **Gemini Embeddings**.
+  - Bebas percabangan statis (*no hardcoded conditions*), seluruh evaluasi klinis mengambil evidensi literatur dari Qdrant RAG.
+- 🎙️ **Multimodal Audio Consultation & Temp SOAP Storage**
   - Transkripsi dan ekstraksi poin penting konsultasi verbal dokter-pasien secara instan menggunakan Google Gemini Multimodal.
+  - Penyimpanan terstruktur SOAP sementara (`temp_soaps`) pada basis data relasional sebelum dikonfirmasi dan dikirimkan ke SIMRS.
+  - Pengayaan otomatis FAQ Medis (Diagnosis, Rekomendasi Obat, Workups/Tindakan) dengan data analisis rekaman audio / SOAP sementara.
+- 🚨 **Clinical Red Flags & Emergency Triage**
+  - Deteksi dini kondisi gawat darurat dan ambang kegawatdaruratan (*red flags*) secara dinamis dengan klasifikasi keparahan (*Critical / High*).
 - 🛡️ **Medical Safety Guardrails & Moderation**
-  - Validasi kontraindikasi, dosis batas aman, dan deteksi dini kondisi gawat darurat (*red flags*).
+  - Validasi kontraindikasi obat, dosis batas aman terhadap fungsi ginjal (eGFR), dan deteksi alergi pasien.
 - 📊 **Panel Administrasi & Audit Trail**
   - Dashboard pemantauan analitik konsultasi, manajemen pengguna (Dokter, Admin, Farmasi), log audit riwayat akses, dan konfigurasi guardrails.
 - 🎨 **Modern & Intuitive Clinical UI**
-  - Antarmuka responsif berbasis Next.js 14 App Router, Tailwind CSS, Dark/Light theme, dan editor interaktif untuk SOAP, CPPT, serta resep obat.
+  - Antarmuka responsif berbasis Next.js 14 App Router, Tailwind CSS, Dark/Light theme, panel akordion template Plan, dan modal multi-tab draf RME (Anamnesis, Diagnosis, Resep Obat, CPPT).
+
 
 ---
 
@@ -117,7 +125,7 @@ AssistanMedixa/
 │   ├── app/
 │   │   ├── core/                  # Konfigurasi aplikasi, database, dan security
 │   │   │   ├── config.py
-│   │   │   ├── database.py
+│   │   │   ├── database.py        # SQLAlchemy models (User, ChatSession, TempSOAP, etc.)
 │   │   │   └── security.py
 │   │   ├── modules/               # Domain modules (Modular Monolith)
 │   │   │   ├── admin/             # Dashboard admin, user management, & analytics
@@ -125,9 +133,12 @@ AssistanMedixa/
 │   │   │   ├── chat/              # Chat session management & Audio STT
 │   │   │   ├── guardrails/        # Safety verification & clinical rules
 │   │   │   ├── mcp/               # Model Context Protocol (SIMRS Server/Client)
-│   │   │   ├── medical_agent/     # LangGraph Agent Graph, nodes, state, & tools
-│   │   │   └── rag/               # Vector search & Knowledge base indexing
+│   │   │   ├── medical_agent/     # LangGraph Agent Graph, skills, state, & clinical tools
+│   │   │   └── rag/               # Vector search, initial knowledge base, & Qdrant service
+│   │   │       ├── initial_knowledge.py  # 21 Clinical reference knowledge documents
+│   │   │       └── rag_service.py        # Dedicated Qdrant RAG service
 │   │   └── main.py                # FastAPI entry point & middleware
+│   ├── tests/                     # Automated test suites (39 unit tests)
 │   ├── run.sh                     # Backend launch script
 │   └── .env.example               # Template environment variable backend
 │
@@ -141,7 +152,7 @@ AssistanMedixa/
 │   │   └── page.tsx               # Landing & Redirects
 │   ├── components/                # Reusable UI Components
 │   │   ├── admin/                 # Admin charts, audit feeds, user tables
-│   │   ├── chat/                  # Chat window, SOAP/CPPT editor, Audio recorder
+│   │   ├── chat/                  # Chat window, SOAP/CPPT editor, Audio recorder, Draft RME
 │   │   ├── common/                # Navbar, modals, metrics card
 │   │   └── knowledge/             # Document uploader, table & search explorer
 │   ├── hooks/                     # Custom React Hooks
@@ -151,6 +162,7 @@ AssistanMedixa/
 │
 ├── .gitignore                     # Git ignore rules
 ├── requirements.txt               # Python backend dependencies
+├── VERSION_NOTES.md               # Catatan rilis dan riwayat versi
 └── README.md                      # Dokumentasi teknis proyek
 ```
 

@@ -1,3 +1,4 @@
+import os
 import json
 import asyncio
 import re
@@ -6,52 +7,210 @@ from datetime import datetime
 # pyrefly: ignore [missing-import]
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 # pyrefly: ignore [missing-import]
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from app.core.security import get_current_user, TokenPayload, require_role
-from app.core.database import db
+from app.core.database import dbApplication
 from app.core.config import settings
-from app.modules.medical_agent.schemas import (
+from app.modules.medical_agent import (
     AgentChatRequest, AgentChatResponse, SOAContentSchema, SOANoteSchema,
     SOAReviewRequest, SOAReviewResponse, SOAConfirmationRequest,
+    TempSOAPContentSchema, TempSOAPRecordSchema, TempSOAPUpdateRequest,
+    TempSOAPCommitResponse,
+    medical_agent_graph
 )
-from app.modules.medical_agent.agent_graph import medical_agent_graph
+from app.modules.medical_agent.tools.simrs_tools import tool_simrs_update_patient_record
+
+AUDIO_STORAGE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../uploads/audio"))
+os.makedirs(AUDIO_STORAGE_DIR, exist_ok=True)
 
 router = APIRouter(prefix="/agent", tags=["Medical Agent"])
 
 
 def _soap_section(markdown: str, heading: str) -> str:
+    """Extracts S, O, A, P, or I sections from clinical Markdown synthesis reliably."""
+    if not markdown:
+        return "Tidak disebutkan."
+
     first_letter = heading[0].upper()
-    # Match headers like ### S — Subjective, ### S - Subjective, ### P — Plan, ## Subjective, etc.
-    pattern = rf"(?:###|\*\*|##)\s*(?:[👤🔬🎯💊📝]\s*)?(?:{first_letter}\s*[—\-\(:\.]\s*{heading}|{heading})[^\n]*\n(.*?)(?=(?:###|\*\*|##)\s*(?:[👤🔬🎯💊📝]\s*)?(?:[SOAPI]\s*[—\-\(:\.]|Subjective|Objective|Assessment|Plan|Instruksi|Transkrip|---\n|\*\(⚠️|\Z))"
-    match = re.search(pattern, markdown, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL)
-    if match and match.group(1).strip():
-        return match.group(1).strip()
-    pattern2 = rf"^##\s+(?:[{first_letter}]\s*[—-]\s*)?{heading}\s*$\s*(.*?)(?=^##\s|\Z)"
-    match2 = re.search(pattern2, markdown, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL)
-    return match2.group(1).strip() if match2 else "Tidak disebutkan."
+
+    # Map heading synonyms
+    synonyms = [heading]
+    if heading.lower() == "subjective":
+        synonyms.extend(["Subjektif", "Anamnesis", "Hasil Anamnesis"])
+    elif heading.lower() == "objective":
+        synonyms.extend(["Objektif", "Pemeriksaan Fisik", "Pemeriksaan", "Evaluasi Hasil Lab", "Tanda Vital"])
+    elif heading.lower() == "assessment":
+        synonyms.extend(["Asesmen", "Diagnosis", "Diagnosa", "Diagnosis Utama", "Rekomendasi Diagnosis"])
+    elif heading.lower() == "plan":
+        synonyms.extend(["Plan", "Penatalaksanaan", "Tata Laksana", "Rencana Terapi", "Rencana", "Rekomendasi Terapi"])
+    elif heading.lower() in ("instruksi", "instruction"):
+        synonyms.extend(["Instruksi", "Instruksi Klinis", "Edukasi", "Edukasi Pasien", "Tanda Bahaya", "PPA"])
+
+    synonyms_regex = "|".join([re.escape(s) for s in synonyms])
+
+    # Pattern matches starting header e.g. ### 💊 P — Plan, ### P - Plan, ### Plan, **Plan:**, etc.
+    header_pattern = rf"(?:^|\n)(?:###|\*\*|##)\s*(?:[👤🔬🎯💊📝🚨💡📌]\s*)?(?:{first_letter}\s*[—\-\(:\.]\s*(?:{synonyms_regex})|{synonyms_regex})[^\n]*\n"
+
+    start_match = re.search(header_pattern, markdown, flags=re.IGNORECASE)
+    if not start_match:
+        # Try finding loose header
+        header_pattern_simple = rf"(?:^|\n)(?:###|##|\*\*)\s*.*?(?:{synonyms_regex}).*?\n"
+        start_match = re.search(header_pattern_simple, markdown, flags=re.IGNORECASE)
+
+    if not start_match:
+        return "Tidak disebutkan."
+
+    start_pos = start_match.end()
+    rest = markdown[start_pos:]
+
+    # Find the next section boundary (next ### / ## header, horizontal rule, disclaimer, or end of text)
+    end_pattern = r"(?:^|\n)(?:(?:###|\*\*|##)\s*(?:[👤🔬🎯💊📝🚨💡📌]\s*)?(?:[SOAPI]\s*[—\-\(:\.]|Subjective|Objective|Assessment|Plan|Instruksi|Edukasi|Transkrip|Status Transaksi|Demografi)|---\n|\*\(⚠️)"
+    end_match = re.search(end_pattern, rest, flags=re.IGNORECASE)
+
+    extracted = rest[:end_match.start()].strip() if end_match else rest.strip()
+
+    # Strip any trailing disclaimer or hr if present
+    extracted = re.sub(r"\n*---\n*\*\(⚠️.*?\)\*?", "", extracted, flags=re.DOTALL).strip()
+
+    return extracted if extracted else "Tidak disebutkan."
 
 
 _soa_section = _soap_section
 
 
-def _create_soap_note(final_synthesis: str, session_id: str, user_id: str) -> dict:
+def _extract_soap_from_state(final_state: dict) -> dict:
+    """
+    Extracts Subjective, Objective, Assessment, Plan, and Instructions from
+    either the structured Pydantic model (structured_output) or Markdown synthesis.
+    """
+    struct = final_state.get("structured_output")
+    soap_obj = None
+    if isinstance(struct, dict):
+        soap_obj = struct.get("soap") or (struct if ("subjective" in struct and "assessment" in struct) else None)
+
+    # 1. First priority: Extract from structured Pydantic Output
+    if soap_obj and isinstance(soap_obj, dict):
+        subj = soap_obj.get("subjective", {})
+        s_lines = []
+        if isinstance(subj, dict):
+            if subj.get("chief_complaint"): s_lines.append(f"- Keluhan Utama: {subj['chief_complaint']}")
+            if subj.get("history_present_illness"): s_lines.append(f"- RPS: {subj['history_present_illness']}")
+            if subj.get("past_medical_history"): s_lines.append(f"- RPD: {subj['past_medical_history']}")
+            if subj.get("allergy_history"): s_lines.append(f"- Riwayat Alergi: {subj['allergy_history']}")
+            if subj.get("medication_history"): s_lines.append(f"- Riwayat Obat: {subj['medication_history']}")
+        s_text = "\n".join(s_lines) if s_lines else ""
+
+        obj = soap_obj.get("objective", {})
+        o_lines = []
+        if isinstance(obj, dict):
+            vs = obj.get("vital_signs", {})
+            if isinstance(vs, dict):
+                vs_parts = [f"{k.replace('_', ' ').title()}: {v}" for k, v in vs.items() if v]
+                if vs_parts: o_lines.append(f"- Tanda Vital: {', '.join(vs_parts)}")
+            if obj.get("physical_examination"):
+                o_lines.append(f"- Pemeriksaan Fisik: {obj['physical_examination']}")
+            labs = obj.get("laboratory_results", [])
+            if isinstance(labs, list) and labs:
+                lab_parts = [f"{l.get('test_name')}: {l.get('value')} {l.get('unit', '')} ({l.get('status', 'Normal')})" for l in labs if isinstance(l, dict)]
+                if lab_parts: o_lines.append(f"- Laboratorium: {', '.join(lab_parts)}")
+        o_text = "\n".join(o_lines) if o_lines else ""
+
+        ass = soap_obj.get("assessment", {})
+        a_lines = []
+        if isinstance(ass, dict):
+            pd = ass.get("primary_diagnosis", {})
+            if isinstance(pd, dict) and pd.get("diagnosis"):
+                icd = f" [ICD-10: {pd.get('icd10')}]" if pd.get("icd10") else ""
+                conf = f" (Keyakinan: {int(float(pd.get('confidence', 0))*100)}%)" if pd.get("confidence") else ""
+                a_lines.append(f"- Diagnosis Primer: {pd.get('diagnosis')}{icd}{conf}")
+            diffs = ass.get("differential_diagnoses", [])
+            if isinstance(diffs, list) and diffs:
+                for d in diffs:
+                    if isinstance(d, dict) and d.get("diagnosis"):
+                        d_icd = f" [ICD-10: {d.get('icd10')}]" if d.get("icd10") else ""
+                        a_lines.append(f"- Diagnosis Banding: {d.get('diagnosis')}{d_icd}")
+            if ass.get("clinical_reasoning"):
+                a_lines.append(f"- Penalaran Klinis: {ass['clinical_reasoning']}")
+        a_text = "\n".join(a_lines) if a_lines else ""
+
+        pl = soap_obj.get("plan", {})
+        p_lines = []
+        i_lines = []
+        if isinstance(pl, dict):
+            meds = pl.get("medications", [])
+            if isinstance(meds, list) and meds:
+                p_lines.append("- Rekomendasi Terapi Obat:")
+                for m in meds:
+                    if isinstance(m, dict) and m.get("drug_name"):
+                        notes = f" ({m.get('notes')})" if m.get("notes") else ""
+                        p_lines.append(f"  • {m.get('drug_name')} {m.get('dosage', '')} {m.get('frequency', '')} {m.get('route', 'Oral')}{notes}".strip())
+            if pl.get("diagnostic_workup"):
+                dw = pl["diagnostic_workup"]
+                p_lines.append(f"- Pemeriksaan Lanjutan: {', '.join(dw) if isinstance(dw, list) else str(dw)}")
+            if pl.get("clinical_procedures"):
+                cp = pl["clinical_procedures"]
+                p_lines.append(f"- Prosedur / Tindakan: {', '.join(cp) if isinstance(cp, list) else str(cp)}")
+            if pl.get("follow_up"):
+                p_lines.append(f"- Rencana Kontrol / Tindak Lanjut: {pl['follow_up']}")
+
+            if pl.get("patient_education"):
+                pe = pl["patient_education"]
+                if isinstance(pe, list):
+                    for edu in pe: i_lines.append(f"- Edukasi Pasien: {edu}")
+                else:
+                    i_lines.append(f"- Edukasi Pasien: {pe}")
+
+        red_flags = soap_obj.get("red_flags", [])
+        if isinstance(red_flags, list) and red_flags:
+            for rf in red_flags:
+                if isinstance(rf, dict) and rf.get("title"):
+                    i_lines.append(f"- Tanda Bahaya (Red Flag) [{rf.get('severity', 'Warning')}]: {rf.get('title')} — {rf.get('action_required', 'Monitoring')}")
+
+        p_text = "\n".join(p_lines) if p_lines else ""
+        i_text = "\n".join(i_lines) if i_lines else ""
+
+        raw_md = final_state.get("final_synthesis", "")
+        return {
+            "subjective": s_text or _soap_section(raw_md, "Subjective"),
+            "objective": o_text or _soap_section(raw_md, "Objective"),
+            "assessment": a_text or _soap_section(raw_md, "Assessment"),
+            "plan": p_text or _soap_section(raw_md, "Plan"),
+            "instructions": i_text or (_soap_section(raw_md, "Instruksi") if ("Instruksi" in raw_md or "Edukasi" in raw_md) else "Sesuai edukasi dan tata laksana klinis terpadu.")
+        }
+
+    # 2. Second priority: Parse directly from Markdown using _soap_section
+    raw_md = final_state.get("final_synthesis", "")
+    return {
+        "subjective": _soap_section(raw_md, "Subjective"),
+        "objective": _soap_section(raw_md, "Objective"),
+        "assessment": _soap_section(raw_md, "Assessment"),
+        "plan": _soap_section(raw_md, "Plan"),
+        "instructions": _soap_section(raw_md, "Instruksi") if ("Instruksi" in raw_md or "Edukasi" in raw_md) else "Sesuai edukasi dan tata laksana klinis terpadu."
+    }
+
+
+def _create_soap_note(final_synthesis: str, session_id: str, user_id: str, final_state: dict | None = None) -> dict:
     now = datetime.now().isoformat()
-    note = {
-        "note_id": f"soap-{uuid4().hex}",
-        "session_id": session_id,
-        "user_id": user_id,
-        "content": {
+    if final_state:
+        extracted = _extract_soap_from_state(final_state)
+    else:
+        extracted = {
             "subjective": _soap_section(final_synthesis, "Subjective"),
             "objective": _soap_section(final_synthesis, "Objective"),
             "assessment": _soap_section(final_synthesis, "Assessment"),
             "plan": _soap_section(final_synthesis, "Plan"),
-        },
+        }
+    note = {
+        "note_id": f"soap-{uuid4().hex}",
+        "session_id": session_id,
+        "user_id": user_id,
+        "content": extracted,
         "status": "draft",
         "pending_content": None,
         "changes": [],
         "updated_at": now,
     }
-    db.soa_notes[note["note_id"]] = note
+    dbApplication.soap_notes[note["note_id"]] = note
     return note
 
 
@@ -63,11 +222,11 @@ def _serialize_soa_note(note: dict) -> SOANoteSchema:
 
 
 def _get_owned_soa_note(note_id: str, current_user: TokenPayload) -> dict:
-    note = db.soa_notes.get(note_id)
+    note = dbApplication.soap_notes.get(note_id)
     if not note:
-        raise HTTPException(status_code=404, detail="Resume S/O/A tidak ditemukan.")
+        raise HTTPException(status_code=404, detail="Resume S/O/A/P tidak ditemukan.")
     if current_user.role != "admin" and note["user_id"] != current_user.sub:
-        raise HTTPException(status_code=403, detail="Forbidden access to S/O/A resume")
+        raise HTTPException(status_code=403, detail="Forbidden access to S/O/A/P resume")
     return note
 
 @router.post("/chat", response_model=AgentChatResponse)
@@ -75,9 +234,11 @@ def execute_agent_chat(
     request: AgentChatRequest,
     current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))
 ):
+    session_id = request.session_id or f"session-{int(datetime.now().timestamp())}"
     initial_state = {
         "messages": [{"role": "user", "content": request.user_query}],
         "patient_id": request.patient_id,
+        "session_id": session_id,
         "user_query": request.user_query,
         "workflow_type": "text",
         "audio_bytes": None,
@@ -90,7 +251,6 @@ def execute_agent_chat(
         "literature_summary": None,
         "final_synthesis": "",
     }
-    session_id = request.session_id or f"session-{int(datetime.now().timestamp())}"
     turn_thread_id = f"{session_id}-turn-{int(datetime.now().timestamp() * 1000)}"
     config = {"configurable": {"thread_id": turn_thread_id}}
 
@@ -99,12 +259,12 @@ def execute_agent_chat(
     
     # Update DB session & history
     doctor_name = current_user.email
-    user_rec = db.users.get(current_user.sub)
+    user_rec = dbApplication.users.get(current_user.sub)
     if user_rec:
         doctor_name = user_rec["name"]
         
-    if session_id not in db.chat_sessions:
-        db.chat_sessions[session_id] = {
+    if session_id not in dbApplication.chat_sessions:
+        dbApplication.chat_sessions[session_id] = {
             "session_id": session_id,
             "user_id": current_user.sub,
             "title": request.user_query[:40] + ("..." if len(request.user_query) > 40 else ""),
@@ -113,12 +273,12 @@ def execute_agent_chat(
             "messages": []
         }
         
-    db.chat_sessions[session_id]["messages"].append({
+    dbApplication.chat_sessions[session_id]["messages"].append({
         "role": "user",
         "content": request.user_query,
         "timestamp": datetime.now().isoformat()
     })
-    db.chat_sessions[session_id]["messages"].append({
+    dbApplication.chat_sessions[session_id]["messages"].append({
         "role": "assistant",
         "content": final_state["final_synthesis"],
         "timestamp": datetime.now().isoformat(),
@@ -128,8 +288,8 @@ def execute_agent_chat(
     })
     
     # Log action in audit trail
-    db.audit_logs.insert(0, {
-        "id": f"log-{len(db.audit_logs)+1}",
+    dbApplication.audit_logs.insert(0, {
+        "id": f"log-{len(dbApplication.audit_logs)+1}",
         "timestamp": datetime.now().isoformat(),
         "user_id": current_user.sub,
         "doctor_name": doctor_name,
@@ -146,7 +306,11 @@ def execute_agent_chat(
         steps_executed=final_state["steps_executed"],
         final_synthesis=final_state["final_synthesis"],
         workflow_type="text",
+        output_validation=final_state.get("output_validation"),
+        structured_output=final_state.get("structured_output"),
     )
+
+
 
 
 import subprocess
@@ -187,7 +351,7 @@ async def execute_audio_chat(
     session_id: str | None = Form(None),
     current_user: TokenPayload = Depends(require_role(["doctor", "admin"])),
 ):
-    """Process a WAV or MP3 recording through Gemini STT with Speaker Diarization, then produce structured SOAP summary."""
+    """Process a WAV or MP3 recording through Gemini STT with Speaker Diarization, produce structured SOAP summary and persist as temp SOAP before SIMRS sync."""
     filename = audio.filename or "audio.mp3"
     allowed_exts = (".wav", ".mp3", ".mpeg", ".m4a", ".ogg")
     if not any(filename.lower().endswith(ext) for ext in allowed_exts):
@@ -227,42 +391,98 @@ async def execute_audio_chat(
     config = {"configurable": {"thread_id": turn_thread_id}}
     final_state = medical_agent_graph.invoke(initial_state, config=config)
 
-    if resolved_session_id not in db.chat_sessions:
-        db.chat_sessions[resolved_session_id] = {
+    # Ensure chat session exists
+    if resolved_session_id not in dbApplication.chat_sessions:
+        dbApplication.chat_sessions[resolved_session_id] = {
             "session_id": resolved_session_id,
             "user_id": current_user.sub,
             "title": f"Audio: {filename}"[:40],
             "created_at": datetime.now().isoformat(),
             "patient_id": patient_id,
+            "temp_soap_id": None,
             "messages": [],
         }
-    elif current_user.role != "admin" and db.chat_sessions[resolved_session_id]["user_id"] != current_user.sub:
+    elif current_user.role != "admin" and dbApplication.chat_sessions[resolved_session_id]["user_id"] != current_user.sub:
         raise HTTPException(status_code=403, detail="Forbidden access to chat session")
 
+    # Persist audio file to disk
+    file_unique_id = uuid4().hex[:8]
+    saved_filename = f"rec_{file_unique_id}_{filename}"
+    saved_filepath = os.path.join(AUDIO_STORAGE_DIR, saved_filename)
+    try:
+        with open(saved_filepath, "wb") as f:
+            f.write(audio_bytes)
+    except Exception as e:
+        print(f"Error saving audio file: {e}")
+
+    # Resolve doctor & patient metadata
+    doctor_name = current_user.email
+    user_rec = dbApplication.users.get(current_user.sub)
+    if user_rec:
+        doctor_name = user_rec.get("name", current_user.email)
+
+    patient_name = None
+    mrn = None
+    nik = None
+    if patient_id and patient_id in dbApplication.patient_records:
+        pat_rec = dbApplication.patient_records[patient_id]
+        patient_name = pat_rec.get("name")
+        mrn = pat_rec.get("patient_id")
+        nik = pat_rec.get("nik")
+    elif patient_id:
+        patient_name = "Eleanor Vance"
+        mrn = f"MRN-SIMRS-{patient_id.replace('P-', '')}"
+
+    # Extract clean SOAP content
+    soap_content_dict = _extract_soap_from_state(final_state)
+
+    # Create Temp SOAP record in application database
+    temp_soap_rec = None
     soa_note = None
     if final_state.get("audio_transcript") and not final_state.get("audio_error"):
-        soa_note = _create_soap_note(final_state["final_synthesis"], resolved_session_id, current_user.sub)
+        soa_note = _create_soap_note(final_state["final_synthesis"], resolved_session_id, current_user.sub, final_state=final_state)
+        temp_soap_rec = dbApplication.create_temp_soap(
+            session_id=resolved_session_id,
+            patient_id=patient_id,
+            user_id=current_user.sub,
+            doctor_name=doctor_name,
+            audio_filename=filename,
+            audio_url=f"/api/v1/agent/soap-temp/audio-file/{saved_filename}",
+            audio_path=saved_filepath,
+            audio_size_bytes=len(raw_audio_bytes),
+            audio_transcript=final_state.get("audio_transcript") or "",
+            soap_content=soap_content_dict,
+            raw_markdown=final_state["final_synthesis"],
+            structured_output=final_state.get("structured_output"),
+            patient_name=patient_name,
+            mrn=mrn,
+            nik=nik,
+        )
+        dbApplication.chat_sessions[resolved_session_id]["temp_soap_id"] = temp_soap_rec["temp_id"]
 
-    db.chat_sessions[resolved_session_id]["messages"].extend([
+    dbApplication.chat_sessions[resolved_session_id]["messages"].extend([
         {"role": "user", "content": audio_label, "timestamp": datetime.now().isoformat()},
         {
             "role": "assistant",
             "content": final_state["final_synthesis"],
             "timestamp": datetime.now().isoformat(),
             "metadata": {
-                "type": "soa_note" if soa_note else None,
+                "type": "temp_soap" if temp_soap_rec else ("soa_note" if soa_note else None),
+                "temp_id": temp_soap_rec["temp_id"] if temp_soap_rec else None,
+                "temp_soap": temp_soap_rec,
+                "audio_url": temp_soap_rec["audio_url"] if temp_soap_rec else None,
                 "note": soa_note,
                 "steps": final_state.get("steps_executed", []),
             },
         },
     ])
-    db.audit_logs.insert(0, {
-        "id": f"log-{len(db.audit_logs) + 1}",
+    dbApplication.audit_logs.insert(0, {
+        "id": f"log-{len(dbApplication.audit_logs) + 1}",
         "timestamp": datetime.now().isoformat(),
         "user_id": current_user.sub,
-        "doctor_name": current_user.email,
-        "action": "Gemini Audio STT & S/O/A/P Summary",
-        "details": f"Audio: '{filename}' | Patient: {patient_id or 'N/A'}",
+        "doctor_name": doctor_name,
+        "action": "Gemini Audio STT & Temporary SOAP Created",
+        "details": f"Audio: '{filename}' | Patient: {patient_id or 'N/A'} | Temp SOAP: {temp_soap_rec['temp_id'] if temp_soap_rec else 'N/A'}",
         "tokens_used": len(final_state["final_synthesis"]) // 4,
         "status": "Success" if not final_state.get("audio_error") else "Failed",
     })
@@ -275,7 +495,241 @@ async def execute_audio_chat(
         workflow_type="audio",
         audio_transcript=final_state.get("audio_transcript"),
         soa_note=_serialize_soa_note(soa_note) if soa_note else None,
+        temp_soap=TempSOAPRecordSchema(**temp_soap_rec) if temp_soap_rec else None,
+        output_validation=final_state.get("output_validation"),
+        structured_output=final_state.get("structured_output"),
     )
+
+
+# ── Temporary SOAP Pre-SIMRS Endpoints ──────────────────────────────
+
+@router.get("/soap-temp", response_model=list[TempSOAPRecordSchema])
+def list_temp_soap(
+    patient_id: str | None = None,
+    status: str | None = None,
+    session_id: str | None = None,
+    limit: int | None = None,
+    current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))
+):
+    """Retrieve list of temporary SOAP records, filtered by patient, status, or session."""
+    user_id = None if current_user.role == "admin" else current_user.sub
+    records = dbApplication.list_temp_soap(
+        user_id=user_id,
+        patient_id=patient_id,
+        status=status,
+        session_id=session_id,
+        limit=limit
+    )
+    return [TempSOAPRecordSchema(**r) for r in records]
+
+
+@router.get("/soap-temp/{temp_id}", response_model=TempSOAPRecordSchema)
+def get_temp_soap(
+    temp_id: str,
+    current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))
+):
+    """Retrieve detailed temporary SOAP record by temp_id."""
+    rec = dbApplication.get_temp_soap(temp_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Data SOAP Temp tidak ditemukan.")
+    if current_user.role != "admin" and rec["user_id"] != current_user.sub:
+        raise HTTPException(status_code=403, detail="Akses ditolak untuk data SOAP Temp ini.")
+    return TempSOAPRecordSchema(**rec)
+
+
+@router.get("/soap-temp/session/{session_id}", response_model=TempSOAPRecordSchema | None)
+def get_temp_soap_by_session(
+    session_id: str,
+    current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))
+):
+    """Retrieve temporary SOAP record associated with a chat session."""
+    rec = dbApplication.get_temp_soap_by_session(session_id)
+    if not rec:
+        return None
+    if current_user.role != "admin" and rec["user_id"] != current_user.sub:
+        raise HTTPException(status_code=403, detail="Akses ditolak untuk data SOAP Temp ini.")
+    return TempSOAPRecordSchema(**rec)
+
+
+@router.put("/soap-temp/{temp_id}", response_model=TempSOAPRecordSchema)
+def update_temp_soap(
+    temp_id: str,
+    request: TempSOAPUpdateRequest,
+    current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))
+):
+    """Update temporary SOAP content or status before pushing to SIMRS."""
+    rec = dbApplication.get_temp_soap(temp_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Data SOAP Temp tidak ditemukan.")
+    if current_user.role != "admin" and rec["user_id"] != current_user.sub:
+        raise HTTPException(status_code=403, detail="Akses ditolak untuk data SOAP Temp ini.")
+
+    updates = {}
+    if request.soap_content is not None:
+        updates["soap_content"] = request.soap_content.model_dump()
+    if request.raw_markdown is not None:
+        updates["raw_markdown"] = request.raw_markdown
+    if request.status is not None:
+        updates["status"] = request.status
+
+    updated = dbApplication.update_temp_soap(temp_id, updates)
+    dbApplication.audit_logs.insert(0, {
+        "id": f"log-{len(dbApplication.audit_logs) + 1}",
+        "timestamp": datetime.now().isoformat(),
+        "user_id": current_user.sub,
+        "doctor_name": current_user.email,
+        "action": "SOAP Temp Record Updated",
+        "details": f"Temp ID: {temp_id} | Status: {updated.get('status')}",
+        "tokens_used": 0,
+        "status": "Success",
+    })
+    return TempSOAPRecordSchema(**updated)
+
+
+@router.delete("/soap-temp/{temp_id}")
+def delete_temp_soap(
+    temp_id: str,
+    current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))
+):
+    """Delete a temporary SOAP record."""
+    rec = dbApplication.get_temp_soap(temp_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Data SOAP Temp tidak ditemukan.")
+    if current_user.role != "admin" and rec["user_id"] != current_user.sub:
+        raise HTTPException(status_code=403, detail="Akses ditolak untuk data SOAP Temp ini.")
+
+    # Remove audio file if exists
+    if rec.get("audio_path") and os.path.exists(rec["audio_path"]):
+        try:
+            os.remove(rec["audio_path"])
+        except Exception:
+            pass
+
+    deleted = dbApplication.delete_temp_soap(temp_id)
+    return {"status": "deleted", "temp_id": temp_id, "success": deleted}
+
+
+@router.post("/soap-temp/{temp_id}/commit-simrs", response_model=TempSOAPCommitResponse)
+def commit_temp_soap_to_simrs(
+    temp_id: str,
+    current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))
+):
+    """Pushes/commits the validated Temporary SOAP record into SIMRS EMR system via MCP."""
+    rec = dbApplication.get_temp_soap(temp_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Data SOAP Temp tidak ditemukan.")
+    if current_user.role != "admin" and rec["user_id"] != current_user.sub:
+        raise HTTPException(status_code=403, detail="Akses ditolak untuk data SOAP Temp ini.")
+
+    # Resolve MRN
+    mrn = rec.get("mrn")
+    if not mrn:
+        pat_id = rec.get("patient_id") or "P-10492"
+        mrn = f"MRN-SIMRS-{pat_id.replace('P-', '')}"
+
+    soap_content = rec.get("soap_content", {})
+    subj = soap_content.get("subjective", "")
+    obj = soap_content.get("objective", "")
+    ass = soap_content.get("assessment", "")
+    plan = soap_content.get("plan", "")
+    inst = soap_content.get("instructions", "")
+
+    doctor_notes = f"S: {subj}\nO: {obj}"
+    primary_diagnosis = ass or "Evaluasi Klinis Terpadu"
+    treatment_plan = f"P: {plan}\nI: {inst or '-'}"
+
+    simrs_res = tool_simrs_update_patient_record(
+        mrn=mrn,
+        doctor_notes=doctor_notes,
+        primary_diagnosis=primary_diagnosis,
+        treatment_plan=treatment_plan
+    )
+
+    updated_rec = dbApplication.mark_temp_soap_synced(temp_id, simrs_res)
+
+    # Append confirmation into chat session if exists
+    sess_id = rec.get("session_id")
+    if sess_id and sess_id in dbApplication.chat_sessions:
+        confirm_msg = (
+            f"✅ **Catatan CPPT S-O-A-P berhasil disinkronisasikan ke SIMRS!**\n\n"
+            f"- **No. Rekam Medis**: `{mrn}`\n"
+            f"- **Pasien**: {rec.get('patient_name') or 'Pasien SIMRS'}\n"
+            f"- **Diagnosa Utama**: {primary_diagnosis}\n"
+            f"- **Nomor Log Transaksi SIMRS**: `{simrs_res.get('log_id', 'LOG-SIMRS-OK')}`\n"
+            f"- **Waktu Sinkronisasi**: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+        )
+        dbApplication.chat_sessions[sess_id]["messages"].append({
+            "role": "assistant",
+            "content": confirm_msg,
+            "timestamp": datetime.now().isoformat(),
+            "metadata": {
+                "type": "simrs_sync_result",
+                "temp_id": temp_id,
+                "simrs_response": simrs_res
+            }
+        })
+
+    # Audit log
+    dbApplication.audit_logs.insert(0, {
+        "id": f"log-{len(dbApplication.audit_logs) + 1}",
+        "timestamp": datetime.now().isoformat(),
+        "user_id": current_user.sub,
+        "doctor_name": current_user.email,
+        "action": "SOAP Temp Committed to SIMRS EMR",
+        "details": f"Temp ID: {temp_id} | MRN: {mrn} | Log: {simrs_res.get('log_id')}",
+        "tokens_used": 0,
+        "status": "Success"
+    })
+
+    return TempSOAPCommitResponse(
+        status="success",
+        message=f"Catatan SOAP Temp berhasil dikirim dan disinkronisasikan ke SIMRS ({mrn}).",
+        temp_soap=TempSOAPRecordSchema(**updated_rec),
+        simrs_response=simrs_res
+    )
+
+
+@router.get("/soap-temp/{temp_id}/audio")
+def stream_temp_soap_audio(
+    temp_id: str,
+    current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))
+):
+    """Streams the recorded audio consultation file for a given temp SOAP."""
+    rec = dbApplication.get_temp_soap(temp_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Data SOAP Temp tidak ditemukan.")
+    if current_user.role != "admin" and rec["user_id"] != current_user.sub:
+        raise HTTPException(status_code=403, detail="Akses ditolak.")
+
+    audio_path = rec.get("audio_path")
+    if not audio_path or not os.path.exists(audio_path):
+        raise HTTPException(status_code=404, detail="Berkas rekaman audio tidak ditemukan di server.")
+
+    media_type = "audio/wav" if rec["audio_filename"].lower().endswith(".wav") else "audio/mpeg"
+    return FileResponse(
+        path=audio_path,
+        media_type=media_type,
+        filename=rec.get("audio_filename", "recording.wav")
+    )
+
+
+@router.get("/soap-temp/audio-file/{filename}")
+def stream_audio_file_by_name(filename: str):
+    """Direct stream of stored audio recording for audio players."""
+    # Sanitize filename
+    safe_name = os.path.basename(filename)
+    audio_path = os.path.join(AUDIO_STORAGE_DIR, safe_name)
+    if not os.path.exists(audio_path):
+        raise HTTPException(status_code=404, detail="Berkas audio tidak ditemukan.")
+
+    media_type = "audio/wav" if safe_name.lower().endswith(".wav") else "audio/mpeg"
+    return FileResponse(
+        path=audio_path,
+        media_type=media_type,
+        filename=safe_name
+    )
+
+
 
 
 @router.put("/soa/review", response_model=SOAReviewResponse)
@@ -305,7 +759,7 @@ def review_soa_note(
         f"Saya mendeteksi {len(changes)} perubahan pada resume S/O/A. "
         "Tinjau perubahan berikut lalu konfirmasikan untuk menerima versi revisi."
     )
-    session = db.chat_sessions.get(note["session_id"])
+    session = dbApplication.chat_sessions.get(note["session_id"])
     if session:
         session["messages"].append({
             "role": "assistant",
@@ -313,8 +767,8 @@ def review_soa_note(
             "timestamp": datetime.now().isoformat(),
             "metadata": {"type": "soa_confirmation", "note_id": note["note_id"]},
         })
-    db.audit_logs.insert(0, {
-        "id": f"log-{len(db.audit_logs) + 1}",
+    dbApplication.audit_logs.insert(0, {
+        "id": f"log-{len(dbApplication.audit_logs) + 1}",
         "timestamp": datetime.now().isoformat(),
         "user_id": current_user.sub,
         "doctor_name": current_user.email,
@@ -348,7 +802,7 @@ def confirm_soa_note(
     note["pending_content"] = None
     note["changes"] = []
     note["updated_at"] = datetime.now().isoformat()
-    session = db.chat_sessions.get(note["session_id"])
+    session = dbApplication.chat_sessions.get(note["session_id"])
     if session:
         session["messages"].append({
             "role": "assistant",
@@ -356,8 +810,8 @@ def confirm_soa_note(
             "timestamp": datetime.now().isoformat(),
             "metadata": {"type": "soa_confirmation_result", "note_id": note["note_id"]},
         })
-    db.audit_logs.insert(0, {
-        "id": f"log-{len(db.audit_logs) + 1}",
+    dbApplication.audit_logs.insert(0, {
+        "id": f"log-{len(dbApplication.audit_logs) + 1}",
         "timestamp": datetime.now().isoformat(),
         "user_id": current_user.sub,
         "doctor_name": current_user.email,
@@ -375,7 +829,7 @@ def get_available_patients(
     current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))
 ):
     """Returns list of patient EHR summaries for doctor selection, optionally filtered by room/poli."""
-    all_patients = list(db.patient_records.values())
+    all_patients = list(dbApplication.patient_records.values())
     if room_id:
         matched = [p for p in all_patients if p.get("room_id") == room_id]
         return matched if matched else all_patients
@@ -392,7 +846,7 @@ def lookup_patient(
     if not q:
         raise HTTPException(status_code=400, detail="Parameter query pencarian pasien tidak boleh kosong.")
 
-    for p in db.patient_records.values():
+    for p in dbApplication.patient_records.values():
         p_id = (p.get("patient_id") or "").lower()
         nik = (p.get("nik") or "").lower()
         ihs = (p.get("ihs_number") or "").lower()
@@ -442,8 +896,16 @@ async def execute_agent_chat_stream(
             yield f"data: {json.dumps({'event': 'chunk', 'text': chunk})}\n\n"
             await asyncio.sleep(0.05)
             
+        if final_state.get("structured_output"):
+            yield f"data: {json.dumps({'event': 'structured_output', 'structured_output': final_state['structured_output']})}\n\n"
+            
+        if final_state.get("output_validation"):
+            yield f"data: {json.dumps({'event': 'output_validation', 'validation': final_state['output_validation']})}\n\n"
+
+            
         session_id = request.session_id or f"session-{int(datetime.now().timestamp())}"
         yield f"data: {json.dumps({'event': 'completed', 'session_id': session_id})}\n\n"
+
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -453,16 +915,16 @@ async def execute_agent_chat_stream(
 @router.get("/clinic-rooms")
 def list_clinic_rooms(current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))):
     """Returns all available clinic rooms / poli for doctor room assignment."""
-    return list(db.clinic_rooms.values())
+    return list(dbApplication.clinic_rooms.values())
 
 
 @router.get("/clinic-rooms/selected")
 def get_selected_room(current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))):
     """Returns the doctor's currently selected room, or null if not set."""
-    room_id = db.doctor_selected_room.get(current_user.sub)
+    room_id = dbApplication.doctor_selected_room.get(current_user.sub)
     if not room_id:
         return {"selected_room": None}
-    room = db.clinic_rooms.get(room_id)
+    room = dbApplication.clinic_rooms.get(room_id)
     return {"selected_room": room}
 
 
@@ -473,9 +935,9 @@ def select_clinic_room(
 ):
     """Set the doctor's active clinic room / poli."""
     room_id = payload.get("room_id", "")
-    if room_id and room_id not in db.clinic_rooms:
+    if room_id and room_id not in dbApplication.clinic_rooms:
         raise HTTPException(status_code=404, detail="Ruangan poli tidak ditemukan.")
-    db.doctor_selected_room[current_user.sub] = room_id
-    room = db.clinic_rooms.get(room_id)
+    dbApplication.doctor_selected_room[current_user.sub] = room_id
+    room = dbApplication.clinic_rooms.get(room_id)
     return {"status": "ok", "selected_room": room}
 

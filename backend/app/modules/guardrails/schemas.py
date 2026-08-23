@@ -38,3 +38,10 @@ class GuardrailViolationSchema(BaseModel):
     action_taken: str
     risk_level: str
     verdict: str
+
+class ValidateOutputRequest(BaseModel):
+    text: str
+    patient_id: Optional[str] = None
+    allergies: Optional[str] = None
+    red_flags: Optional[List[str]] = Field(default_factory=list)
+
