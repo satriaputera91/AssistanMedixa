@@ -53,3 +53,14 @@ class RAGSearchResponse(BaseModel):
     query: str
     results_count: int
     chunks: List[RAGChunkResult]
+
+class ExtractKeywordsRequest(BaseModel):
+    text: str
+    title: Optional[str] = None
+    max_keywords: Optional[int] = 10
+
+class ExtractKeywordsResponse(BaseModel):
+    status: str
+    keywords: List[str]
+    count: int
+

@@ -2,6 +2,35 @@
 
 ---
 
+## 🚀 Versi 1.4.0 (2026-08-23)
+
+### 📌 Ringkasan Rilis
+Pembaruan **Versi 1.4.0** menghadirkan pembaruan alur kerja **LangGraph Vector DB Search Routing** untuk konsultasi medis umum, fitur **Manajemen Ruang Poli Klinis (Clinic Room Management)** bagi Admin & Dokter, pengayaan **Knowledge Management dengan Ekstraksi File PDF & DOCX**, serta tagging kata kunci terstruktur.
+
+---
+
+### ✨ Fitur Baru & Peningkatan Utama
+
+#### 1. 🔍 Alur Pencarian Vector DB Wajib pada Konsultasi Medis Umum
+- **LangGraph Routing Terintegrasi**: Kueri pada mode Konsultasi Medis Umum (tanpa pemilihan pasien spesifik) sekarang **wajib melewati langkah pencarian ke Vector DB (Qdrant RAG & Evidence-Based Literature Search)** sebelum dieksekusi oleh simpul sintesis Google Gemini.
+- **Audit Trail & Step Logging**: Peningkatan pencatatan langkah `Retrieval Augmentation Generation (Qdrant Vector DB)` pada `steps_executed` dan penyediaan `rag_chunks` serta `literature_summary` dalam state untuk grounding LLM yang optimal.
+- **Penambahan Skenario Uji**: Penambahan pengujian skenario `test_01b_general_conversation_passes_through_vector_db_search` dan pengujian urutan eksekusi step.
+
+#### 2. 🏥 Manajemen Ruang Poli Klinis (Clinic Room Management)
+- **Modul CRUD Ruangan Poli**: Panel administrasi untuk mengelola ruangan poli (Poli Penyakit Dalam, Jantung, Bedah, Anak, Saraf, dll.) lengkap dengan kode poli, gedung, lantai, kapasitas harian, dan status aktif.
+- **Penugasan Dokter & Filter Pasien**: Dokter dapat memilih ruangan poli aktif saat bertugas, dan daftar pasien akan otomatis terfilter sesuai alokasi antrean poli.
+- **Endpoint API**: Penyediaan endpoint `/api/v1/admin/clinic-rooms`, `/api/v1/agent/clinic-rooms`, dan `/api/v1/agent/clinic-rooms/select`.
+
+#### 3. 📄 Dukungan Upload Dokumen PDF & DOCX pada Knowledge Management
+- **Ekstraksi Teks Otomatis**: Kemampuan mengunggah dokumen pedoman klinis dalam format `.pdf` dan `.docx` dengan ekstraksi konten teks otomatis (`pypdf` / `python-docx`).
+- **Ekstraksi Kata Kunci & Metadata**: Otomatisasi pembentukan tag/keyword klinis dan pembagian dokumen menjadi chunk berukuran optimal untuk indexing Qdrant Vector DB.
+- **Antarmuka Knowledge Explorer**: Penambahan komponen `FileUploader.tsx`, form modal dengan tag input interaktif, serta filter pencarian yang disempurnakan.
+
+#### 4. 🧪 Pengujian & Verifikasi Mutu
+- **40 Unit & Scenario Test Backend**: Seluruh 40 skenario pengujian backend (termasuk unit test poli dan RAG file parsing) lulus 100% (`Ran 40 tests in 59.458s - OK`).
+
+---
+
 ## 🚀 Versi 1.3.0 (2026-08-22)
 
 ### 📌 Ringkasan Rilis

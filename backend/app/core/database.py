@@ -172,14 +172,152 @@ class InMemoryDatabase:
                 "building": "Gedung Utama (Poliklinik)",
                 "specialty": "General Practice / Primary Care",
                 "status": "active",
+                "description": "Layanan rawat jalan umum dan skrining primer",
+                "operational_hours": "07:30 - 20:00 WIB",
+                "created_at": "2026-01-01T08:00:00",
+                "updated_at": "2026-01-01T08:00:00",
             },
         }
+
+        # Initialize existing rooms with default descriptions and timestamps if missing
+        now_iso = datetime.now().isoformat()
+        for room in self.clinic_rooms.values():
+            if "description" not in room:
+                room["description"] = f"Layanan spesialis dan rawat jalan {room.get('room_name', '')}"
+            if "operational_hours" not in room:
+                room["operational_hours"] = "08:00 - 16:00 WIB"
+            if "created_at" not in room:
+                room["created_at"] = now_iso
+            if "updated_at" not in room:
+                room["updated_at"] = now_iso
 
         # Tracks which doctor selected which room (user_id -> room_id)
         self.doctor_selected_room: Dict[str, str] = {}
 
         # Temporary SOAP Records from audio & consultation sessions before sync to SIMRS
         self.temp_soap_records: Dict[str, dict] = {}
+
+    def get_assigned_doctors_for_room(self, room_id: str) -> List[dict]:
+        """Get list of active doctors assigned to a specific room."""
+        assigned = []
+        for user_id, assigned_room_id in self.doctor_selected_room.items():
+            if assigned_room_id == room_id:
+                user = self.users.get(user_id)
+                if user:
+                    assigned.append({
+                        "id": user.get("id"),
+                        "name": user.get("name"),
+                        "email": user.get("email"),
+                        "specialty": user.get("specialty"),
+                        "license_no": user.get("license_no"),
+                    })
+        return assigned
+
+    def get_all_clinic_rooms(self, include_assigned_doctors: bool = True) -> List[dict]:
+        """Returns all clinic rooms with assigned doctors metadata."""
+        rooms = []
+        for room in self.clinic_rooms.values():
+            room_data = dict(room)
+            if include_assigned_doctors:
+                room_data["assigned_doctors"] = self.get_assigned_doctors_for_room(room.get("room_id", ""))
+            rooms.append(room_data)
+        return rooms
+
+    def get_clinic_room(self, room_id: str) -> Optional[dict]:
+        """Get clinic room by ID with assigned doctors."""
+        room = self.clinic_rooms.get(room_id)
+        if not room:
+            return None
+        room_data = dict(room)
+        room_data["assigned_doctors"] = self.get_assigned_doctors_for_room(room_id)
+        return room_data
+
+    def create_clinic_room(self, data: dict) -> dict:
+        """Create a new clinic room."""
+        from uuid import uuid4
+        now_iso = datetime.now().isoformat()
+        
+        # Check if code already exists
+        room_code = data.get("room_code", "").strip()
+        for r in self.clinic_rooms.values():
+            if r.get("room_code", "").lower() == room_code.lower():
+                raise ValueError(f"Kode ruangan '{room_code}' sudah digunakan.")
+        
+        room_id = data.get("room_id")
+        if not room_id or room_id in self.clinic_rooms:
+            # Generate sequential or UUID-based room ID
+            next_num = len(self.clinic_rooms) + 1
+            room_id = f"ROOM-{next_num:03d}"
+            while room_id in self.clinic_rooms:
+                next_num += 1
+                room_id = f"ROOM-{next_num:03d}"
+
+        new_room = {
+            "room_id": room_id,
+            "room_name": data.get("room_name", "").strip(),
+            "room_code": room_code,
+            "floor": data.get("floor", "Lantai 1").strip(),
+            "building": data.get("building", "Gedung A").strip(),
+            "specialty": data.get("specialty", "General Medicine").strip(),
+            "status": data.get("status", "active"),
+            "description": data.get("description", "").strip() or f"Layanan spesialis {data.get('room_name', '')}",
+            "operational_hours": data.get("operational_hours", "08:00 - 16:00 WIB").strip(),
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+        self.clinic_rooms[room_id] = new_room
+        return self.get_clinic_room(room_id)
+
+    def update_clinic_room(self, room_id: str, updates: dict) -> Optional[dict]:
+        """Update an existing clinic room."""
+        room = self.clinic_rooms.get(room_id)
+        if not room:
+            return None
+        
+        new_code = updates.get("room_code")
+        if new_code:
+            new_code = new_code.strip()
+            for rid, r in self.clinic_rooms.items():
+                if rid != room_id and r.get("room_code", "").lower() == new_code.lower():
+                    raise ValueError(f"Kode ruangan '{new_code}' sudah digunakan oleh ruangan lain.")
+            room["room_code"] = new_code
+
+        for key in ["room_name", "floor", "building", "specialty", "status", "description", "operational_hours"]:
+            if key in updates and updates[key] is not None:
+                room[key] = updates[key].strip() if isinstance(updates[key], str) else updates[key]
+
+        room["updated_at"] = datetime.now().isoformat()
+        return self.get_clinic_room(room_id)
+
+    def delete_clinic_room(self, room_id: str) -> bool:
+        """Delete clinic room and remove doctor assignments."""
+        if room_id not in self.clinic_rooms:
+            return False
+        
+        self.clinic_rooms.pop(room_id)
+        # Unassign doctors assigned to this room
+        doctors_to_unassign = [uid for uid, rid in self.doctor_selected_room.items() if rid == room_id]
+        for uid in doctors_to_unassign:
+            self.doctor_selected_room.pop(uid, None)
+        return True
+
+    def toggle_clinic_room_status(self, room_id: str) -> Optional[dict]:
+        """Toggle clinic room status between active and inactive."""
+        room = self.clinic_rooms.get(room_id)
+        if not room:
+            return None
+        
+        current_status = room.get("status", "active")
+        room["status"] = "inactive" if current_status == "active" else "active"
+        room["updated_at"] = datetime.now().isoformat()
+        
+        # If deactivated, unassign active doctors
+        if room["status"] != "active":
+            doctors_to_unassign = [uid for uid, rid in self.doctor_selected_room.items() if rid == room_id]
+            for uid in doctors_to_unassign:
+                self.doctor_selected_room.pop(uid, None)
+                
+        return self.get_clinic_room(room_id)
 
     def create_temp_soap(
         self,

@@ -36,6 +36,7 @@ class AdminStatsResponse(BaseModel):
     total_queries_run: int
     total_gemini_tokens: int
     gemini_model_active: str
+    total_clinic_rooms: Optional[int] = 0
 
 
 class UsageDailyPoint(BaseModel):
@@ -63,3 +64,50 @@ class ServiceHealthSchema(BaseModel):
 class MonitoringResponse(BaseModel):
     services: List[ServiceHealthSchema]
     checked_at: str
+
+
+class AssignedDoctorView(BaseModel):
+    id: str
+    name: str
+    email: str
+    specialty: Optional[str] = None
+    license_no: Optional[str] = None
+
+
+class ClinicRoomAdminView(BaseModel):
+    room_id: str
+    room_name: str
+    room_code: str
+    floor: str
+    building: str
+    specialty: str
+    status: str
+    description: Optional[str] = None
+    operational_hours: Optional[str] = "08:00 - 16:00 WIB"
+    assigned_doctors: List[AssignedDoctorView] = []
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class CreateClinicRoomRequest(BaseModel):
+    room_id: Optional[str] = None
+    room_name: str
+    room_code: str
+    floor: str
+    building: str
+    specialty: str
+    status: Optional[str] = "active"
+    description: Optional[str] = None
+    operational_hours: Optional[str] = "08:00 - 16:00 WIB"
+
+
+class UpdateClinicRoomRequest(BaseModel):
+    room_name: Optional[str] = None
+    room_code: Optional[str] = None
+    floor: Optional[str] = None
+    building: Optional[str] = None
+    specialty: Optional[str] = None
+    status: Optional[str] = None
+    description: Optional[str] = None
+    operational_hours: Optional[str] = None
+

@@ -51,10 +51,9 @@ export default function KnowledgePage() {
           </div>
         )}
         {/* Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <MetricCard label="Dokumen Terindeks" value={totalItems} color="emerald" icon="📄" />
           <MetricCard label="Total Vektor Qdrant" value={totalVectors} color="emerald" icon="🔗" />
-          <MetricCard label="Mesin Embedding" value="Gemini text-embedding-004" color="emerald" icon="🧠" />
         </div>
 
         {/* Semantic Search Explorer */}

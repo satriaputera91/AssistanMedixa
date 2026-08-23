@@ -60,23 +60,50 @@ export default function FileUploader({ onUpload, uploading }: FileUploaderProps)
     }
   };
 
+  const getFileIcon = (filename: string) => {
+    const ext = filename.split('.').pop()?.toLowerCase();
+    if (ext === 'pdf') return '📕';
+    if (ext === 'docx' || ext === 'doc') return '📘';
+    if (ext === 'json') return '📦';
+    if (ext === 'md' || ext === 'txt') return '📄';
+    return '📁';
+  };
+
   return (
-    <div className="bg-white border border-emerald-200 rounded-2xl p-6 shadow-lg flex flex-col justify-between">
+    <div className="bg-white dark:bg-slate-900 border border-emerald-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm flex flex-col justify-between transition-colors">
       <div>
-        <h2 className="text-lg font-bold text-emerald-950 mb-1">📄 Unggah Dokumen Medis</h2>
-        <p className="text-xs text-emerald-700 mb-4">
-          Unggah panduan atau protokol klinis .txt, .md, atau .json untuk diindeks ke Qdrant.
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <h2 className="text-base font-bold text-emerald-950 dark:text-white flex items-center gap-2">
+            <span>📄</span>
+            <span>Unggah Dokumen Medis</span>
+          </h2>
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+            ✨ AI Gemini Auto-Keywords
+          </span>
+        </div>
+        <p className="text-xs text-emerald-700 dark:text-slate-400 mb-4">
+          Unggah panduan klinis, jurnal, atau protokol format <strong>PDF, DOCX, TXT, MD, JSON</strong> untuk diindeks ke Qdrant.
         </p>
 
         {feedback && (
           <div
-            className={`mb-4 p-3 rounded-xl border text-xs ${
+            className={`mb-4 p-3 rounded-2xl border text-xs flex items-center justify-between ${
               feedback.type === 'success'
-                ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                : 'bg-red-50 border-red-300 text-red-700'
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-300'
+                : 'bg-red-50 dark:bg-red-950/40 border-red-300 dark:border-red-800 text-red-700 dark:text-red-300'
             }`}
           >
-            {feedback.message}
+            <div className="flex items-center gap-2">
+              <span>{feedback.type === 'success' ? '✅' : '⚠️'}</span>
+              <span>{feedback.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFeedback(null)}
+              className="text-xs opacity-70 hover:opacity-100"
+            >
+              ✕
+            </button>
           </div>
         )}
 
@@ -86,57 +113,81 @@ export default function FileUploader({ onUpload, uploading }: FileUploaderProps)
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
             onDrop={handleDrop}
-            className={`relative border-2 border-dashed rounded-xl p-6 text-center transition-colors cursor-pointer ${
+            className={`relative border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer ${
               dragOver
-                ? 'border-emerald-500 bg-emerald-500/10'
+                ? 'border-emerald-500 bg-emerald-500/10 dark:bg-emerald-950/30'
                 : selectedFileName
-                ? 'border-emerald-500 bg-emerald-50/50'
-                : 'border-emerald-300 hover:border-emerald-500'
+                ? 'border-emerald-500 bg-emerald-50/50 dark:bg-slate-800/60'
+                : 'border-emerald-300 dark:border-slate-700 hover:border-emerald-500 hover:bg-emerald-50/30 dark:hover:bg-slate-800/40'
             }`}
             onClick={() => fileRef.current?.click()}
           >
-            <div className="text-2xl mb-2">{selectedFileName ? '📄' : '📁'}</div>
+            <div className="text-3xl mb-2">
+              {selectedFileName ? getFileIcon(selectedFileName) : '📤'}
+            </div>
             {selectedFileName ? (
-              <p className="text-xs text-emerald-950 font-semibold truncate px-4">
-                {selectedFileName}
-              </p>
+              <div>
+                <p className="text-xs text-emerald-950 dark:text-slate-100 font-bold truncate px-4">
+                  {selectedFileName}
+                </p>
+                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1 font-semibold">
+                  Klik untuk mengganti file
+                </p>
+              </div>
             ) : (
-              <p className="text-xs text-emerald-700">
-                Seret file ke sini, atau <span className="text-emerald-700 underline font-semibold">klik untuk memilih</span>
-              </p>
+              <div>
+                <p className="text-xs text-emerald-800 dark:text-slate-200 font-medium">
+                  Seret file ke sini, atau <span className="text-emerald-600 dark:text-emerald-400 underline font-bold">klik untuk memilih</span>
+                </p>
+                <p className="text-[10px] text-emerald-600 dark:text-slate-400 mt-1">
+                  Mendukung <strong>.pdf, .docx, .doc, .txt, .md, .json, .csv</strong>
+                </p>
+              </div>
             )}
-            <p className="text-[10px] text-emerald-600 mt-1">Mendukung .txt, .md, .json</p>
             <input
               ref={fileRef}
               type="file"
-              accept=".txt,.md,.json,.csv"
+              accept=".pdf,.docx,.doc,.txt,.md,.json,.csv"
               className="hidden"
               onChange={handleFileChange}
             />
           </div>
 
+          {/* AI Auto-Extraction Badge Banner */}
+          <div className="p-2.5 bg-emerald-50/60 dark:bg-slate-800/60 rounded-xl border border-emerald-200/60 dark:border-slate-700 text-[11px] text-emerald-800 dark:text-slate-300 flex items-center gap-2">
+            <span className="text-sm">🤖</span>
+            <span>
+              <strong>Gemini AI Integration:</strong> Teks diekstrak otomatis dan kata kunci klinis dianalisis langsung menggunakan model LLM Gemini.
+            </span>
+          </div>
+
           {/* Category & Specialty */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[10px] font-semibold text-emerald-700 uppercase mb-1">Kategori</label>
+              <label className="block text-[10px] font-bold text-emerald-800 dark:text-slate-300 uppercase tracking-wider mb-1">
+                Kategori
+              </label>
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                className="w-full bg-emerald-50 border border-emerald-200 rounded-lg p-2 text-xs text-emerald-900 focus:border-emerald-500 focus:outline-none"
+                className="w-full bg-emerald-50/50 dark:bg-slate-800 border border-emerald-200 dark:border-slate-700 rounded-xl p-2.5 text-xs text-emerald-950 dark:text-slate-100 focus:border-emerald-500 focus:outline-none"
               >
-                <option value="disease">Penyakit</option>
-                <option value="medicine">Obat</option>
-                <option value="terminology">Terminologi</option>
-                <option value="guideline">Panduan Klinis</option>
+                <option value="disease">Penyakit (Disease)</option>
+                <option value="medicine">Obat / Farmakologi</option>
+                <option value="terminology">Terminologi Klinis</option>
+                <option value="guideline">Panduan Praktik Klinis</option>
               </select>
             </div>
             <div>
-              <label className="block text-[10px] font-semibold text-emerald-700 uppercase mb-1">Spesialisasi</label>
+              <label className="block text-[10px] font-bold text-emerald-800 dark:text-slate-300 uppercase tracking-wider mb-1">
+                Spesialisasi
+              </label>
               <input
                 type="text"
                 value={specialty}
                 onChange={(e) => setSpecialty(e.target.value)}
-                className="w-full bg-emerald-50 border border-emerald-200 rounded-lg p-2 text-xs text-emerald-900 focus:border-emerald-500 focus:outline-none"
+                placeholder="Contoh: Pulmonologi, Kardiologi"
+                className="w-full bg-emerald-50/50 dark:bg-slate-800 border border-emerald-200 dark:border-slate-700 rounded-xl p-2.5 text-xs text-emerald-950 dark:text-slate-100 focus:border-emerald-500 focus:outline-none"
               />
             </div>
           </div>
@@ -144,13 +195,24 @@ export default function FileUploader({ onUpload, uploading }: FileUploaderProps)
           <button
             type="submit"
             disabled={uploading}
-            className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-xs rounded-xl shadow-md transition-all active:scale-[0.98]"
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-600/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
           >
-            {uploading ? 'Mengunggah & mengindeks…' : 'Unggah & indeks ke Qdrant'}
+            {uploading ? (
+              <>
+                <span className="animate-spin">⏳</span>
+                <span>Mengekstrak teks & menganalisis kata kunci Gemini…</span>
+              </>
+            ) : (
+              <>
+                <span>🚀</span>
+                <span>Unggah &amp; Ekstrak ke Qdrant</span>
+              </>
+            )}
           </button>
         </form>
       </div>
     </div>
   );
 }
+
 

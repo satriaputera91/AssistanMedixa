@@ -1,16 +1,21 @@
 import os
 import math
 import re
+import io
+import logging
 # pyrefly: ignore [missing-import]
 import numpy as np
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+
 # pyrefly: ignore [missing-import]
 from qdrant_client import QdrantClient
 # pyrefly: ignore [missing-import]
 from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 try:
     # pyrefly: ignore [missing-import]
@@ -19,10 +24,121 @@ try:
 except ImportError:
     HAS_GOOGLE_GENAI = False
 
+
+# ==============================================================================
+# DOCUMENT TEXT EXTRACTOR (PDF, DOCX, TXT, MD, JSON, CSV)
+# ==============================================================================
+def extract_text_from_file_bytes(filename: str, content_bytes: bytes) -> str:
+    """Extracts text content from various file formats (.pdf, .docx, .doc, .txt, .md, .json, .csv)."""
+    ext = os.path.splitext(filename)[1].lower()
+
+    if ext == ".pdf":
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(content_bytes))
+            pages_text = []
+            for idx, page in enumerate(reader.pages):
+                page_text = page.extract_text() or ""
+                if page_text.strip():
+                    pages_text.append(f"### Halaman {idx + 1}\n{page_text.strip()}")
+            if pages_text:
+                return "\n\n".join(pages_text)
+            return "Tidak ada teks yang dapat diekstrak dari dokumen PDF ini."
+        except Exception as e:
+            logger.error("Error reading PDF file %s: %s", filename, e)
+            return f"Dokumen PDF: {filename}\nCatatan: Gagal memproses teks PDF secara langsung ({str(e)})."
+
+    elif ext in (".docx", ".doc"):
+        try:
+            from docx import Document
+            doc = Document(io.BytesIO(content_bytes))
+            sections = []
+            for p in doc.paragraphs:
+                txt = p.text.strip()
+                if txt:
+                    sections.append(txt)
+            for t_idx, table in enumerate(doc.tables):
+                table_lines = []
+                for row in table.rows:
+                    row_cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                    if row_cells:
+                        table_lines.append(" | ".join(row_cells))
+                if table_lines:
+                    sections.append(f"### Tabel {t_idx + 1}\n" + "\n".join(table_lines))
+            if sections:
+                return "\n\n".join(sections)
+            return "Tidak ada teks yang dapat diekstrak dari dokumen Word (DOCX) ini."
+        except Exception as e:
+            logger.error("Error reading DOCX file %s: %s", filename, e)
+            return f"Dokumen Word: {filename}\nCatatan: Gagal memproses teks DOCX secara langsung ({str(e)})."
+
+    else:
+        try:
+            return content_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            return content_bytes.decode("latin-1", errors="ignore")
+
+
+# ==============================================================================
+# GEMINI LLM KEYWORD EXTRACTION ENGINE
+# ==============================================================================
+def extract_keywords_with_gemini(text: str, title: Optional[str] = None, max_keywords: int = 10) -> List[str]:
+    """Extracts clinical and domain-specific keywords from medical text using Gemini LLM."""
+    api_key = settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")
+
+    if api_key and HAS_GOOGLE_GENAI:
+        try:
+            client = genai.Client(api_key=api_key)
+            prompt = (
+                "Kamu adalah asisten AI medis untuk indexing sistem RAG rekam medis klinis. "
+                "Tugasmu adalah menganalisis konten dokumen medis berikut dan mengekstrak 5-10 kata kunci (keywords / medical terms) terpenting, "
+                "seperti nama penyakit, nama obat, istilah klinis, prosedur medis, temuan lab, atau konsep diagnosis terkait.\n\n"
+                f"Judul Dokumen: {title or 'Tanpa Judul'}\n"
+                f"Potongan Konten:\n{text[:4500]}\n\n"
+                "Format respon: HANYA tuliskan kata kunci yang dipisahkan dengan tanda koma (contoh: diabetes melitus, metformin, hba1c, nefropati diabetik, insulin, hiperglikemia). "
+                "JANGAN sertakan nomor urut, judul tambahan, atau kalimat pembuka/penutup."
+            )
+            response = client.models.generate_content(
+                model=settings.GEMINI_MODEL_NAME or "gemini-2.0-flash",
+                contents=prompt
+            )
+            if response and response.text:
+                raw = response.text.strip()
+                items = [
+                    k.strip().strip("-*•").lower()
+                    for k in re.split(r"[,;\n]+", raw)
+                    if k.strip() and len(k.strip()) > 1
+                ]
+                if items:
+                    seen = set()
+                    unique_items = []
+                    for item in items:
+                        if item not in seen:
+                            seen.add(item)
+                            unique_items.append(item)
+                    return unique_items[:max_keywords]
+        except Exception as e:
+            logger.warning("Gagal ekstraksi kata kunci dengan Gemini: %s", e)
+
+    # Fallback heuristic keyword extraction if LLM is unavailable
+    words = [w.lower() for w in re.findall(r'[a-zA-Z0-9_-]+', f"{title or ''} {text}") if len(w) > 3]
+    stopwords = {
+        "yang", "untuk", "pada", "dari", "dalam", "dengan", "adalah", "ini", "itu", "akan",
+        "dapat", "juga", "sebagai", "oleh", "file", "document", "metadata", "content", "overview",
+        "halaman", "tabel", "atau", "serta", "saja", "telah", "lebih", "karena", "maka", "bisa",
+        "tidak", "kategori", "spesialisasi", "upload", "uploaded"
+    }
+    filtered = [w for w in words if w not in stopwords]
+    from collections import Counter
+    counts = Counter(filtered)
+    return [w for w, _ in counts.most_common(max_keywords)]
+
+
 # ==============================================================================
 # PRE-LOADED MEDICAL KNOWLEDGE BASE DOCUMENTS (Imported from initial_knowledge.py)
 # ==============================================================================
 from app.modules.rag.initial_knowledge import INITIAL_KNOWLEDGE_BASE
+
 
 
 
@@ -181,6 +297,16 @@ class DedicatedQdrantRAGService:
         if "created_at" not in doc:
             doc["created_at"] = datetime.now().isoformat()
             
+        # Auto-extract keywords using Gemini if keywords are empty or not provided
+        if not doc.get("keywords"):
+            doc["keywords"] = extract_keywords_with_gemini(
+                text=doc.get("content", ""),
+                title=doc.get("title"),
+                max_keywords=10
+            )
+        if not doc.get("synonyms") and doc.get("title"):
+            doc["synonyms"] = [doc["title"]] + (doc["keywords"][:3] if doc.get("keywords") else [])
+
         chunks = SemanticMarkdownChunker.chunk_document(doc)
         doc["chunks_count"] = len(chunks)
         self.knowledge_store[item_id] = doc
@@ -208,11 +334,18 @@ class DedicatedQdrantRAGService:
         filename: str, 
         raw_content: str, 
         category: str = "document", 
-        specialty: str = "General Medicine"
+        specialty: str = "General Medicine",
+        custom_keywords: Optional[List[str]] = None
     ) -> Dict[str, Any]:
-        """Ingests raw file text upload (.txt, .md, .json) into Qdrant knowledge base."""
+        """Ingests raw file text upload (.pdf, .docx, .txt, .md, .json) into Qdrant knowledge base with Gemini keyword extraction."""
         doc_title = os.path.splitext(filename)[0].replace("_", " ").replace("-", " ").title()
         
+        # Extract keywords with Gemini LLM
+        if custom_keywords:
+            keywords = custom_keywords
+        else:
+            keywords = extract_keywords_with_gemini(raw_content, title=doc_title, max_keywords=10)
+            
         doc = {
             "title": doc_title,
             "category": category,
@@ -220,18 +353,23 @@ class DedicatedQdrantRAGService:
             "icd10_code": None,
             "rxnorm_code": None,
             "loinc_code": None,
-            "synonyms": [doc_title],
-            "keywords": [w.lower() for w in re.findall(r'\w+', doc_title) if len(w) > 3],
+            "synonyms": [doc_title] + (keywords[:3] if keywords else []),
+            "keywords": keywords,
             "evidence_level": f"Uploaded File ({filename})",
             "created_at": datetime.now().isoformat(),
             "content": f"### Overview & File Metadata\nFilename: {filename}\nUploaded: {datetime.now().isoformat()}\n\n### Document Content\n{raw_content}"
         }
         return self.add_knowledge_item(doc)
 
+    def extract_keywords(self, text: str, title: Optional[str] = None, max_keywords: int = 10) -> List[str]:
+        """Expose Gemini LLM keyword extraction for API callers."""
+        return extract_keywords_with_gemini(text, title=title, max_keywords=max_keywords)
+
     def delete_knowledge_item(self, item_id: str) -> bool:
         """Deletes a knowledge document and its vector points from Qdrant."""
         if item_id in self.knowledge_store:
             del self.knowledge_store[item_id]
+
             # Re-initialize & re-index remaining items
             self._initialize_collection()
             self.next_point_id = 1

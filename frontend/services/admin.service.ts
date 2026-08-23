@@ -7,6 +7,7 @@ export interface AdminStats {
   total_queries_run: number;
   total_gemini_tokens: number;
   gemini_model_active: string;
+  total_clinic_rooms?: number;
 }
 
 export interface UserAdminView {
@@ -67,6 +68,52 @@ export interface CreateUserInput {
   license_no?: string;
 }
 
+export interface ClinicRoomAssignedDoctor {
+  id: string;
+  name: string;
+  email: string;
+  specialty?: string;
+  license_no?: string;
+}
+
+export interface ClinicRoomAdmin {
+  room_id: string;
+  room_name: string;
+  room_code: string;
+  floor: string;
+  building: string;
+  specialty: string;
+  status: 'active' | 'inactive' | 'maintenance';
+  description?: string;
+  operational_hours?: string;
+  assigned_doctors: ClinicRoomAssignedDoctor[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CreateClinicRoomInput {
+  room_id?: string;
+  room_name: string;
+  room_code: string;
+  floor: string;
+  building: string;
+  specialty: string;
+  status?: 'active' | 'inactive' | 'maintenance';
+  description?: string;
+  operational_hours?: string;
+}
+
+export interface UpdateClinicRoomInput {
+  room_name?: string;
+  room_code?: string;
+  floor?: string;
+  building?: string;
+  specialty?: string;
+  status?: 'active' | 'inactive' | 'maintenance';
+  description?: string;
+  operational_hours?: string;
+}
+
 export class AdminService {
   public static async getStats(): Promise<AdminStats> {
     return ApiClient.get<AdminStats>('/admin/stats');
@@ -94,5 +141,31 @@ export class AdminService {
 
   public static async getMonitoring(): Promise<SystemMonitoring> {
     return ApiClient.get<SystemMonitoring>('/admin/monitoring');
+  }
+
+  // ── Clinic Room / Poli Management Methods ──────────────────────────
+
+  public static async getClinicRooms(): Promise<ClinicRoomAdmin[]> {
+    return ApiClient.get<ClinicRoomAdmin[]>('/admin/clinic-rooms');
+  }
+
+  public static async getClinicRoom(roomId: string): Promise<ClinicRoomAdmin> {
+    return ApiClient.get<ClinicRoomAdmin>(`/admin/clinic-rooms/${roomId}`);
+  }
+
+  public static async createClinicRoom(input: CreateClinicRoomInput): Promise<ClinicRoomAdmin> {
+    return ApiClient.post<ClinicRoomAdmin>('/admin/clinic-rooms', input);
+  }
+
+  public static async updateClinicRoom(roomId: string, input: UpdateClinicRoomInput): Promise<ClinicRoomAdmin> {
+    return ApiClient.put<ClinicRoomAdmin>(`/admin/clinic-rooms/${roomId}`, input);
+  }
+
+  public static async deleteClinicRoom(roomId: string): Promise<{ status: string; message: string; room_id: string }> {
+    return ApiClient.delete<{ status: string; message: string; room_id: string }>(`/admin/clinic-rooms/${roomId}`);
+  }
+
+  public static async toggleClinicRoomStatus(roomId: string): Promise<ClinicRoomAdmin> {
+    return ApiClient.post<ClinicRoomAdmin>(`/admin/clinic-rooms/${roomId}/toggle-status`, {});
   }
 }

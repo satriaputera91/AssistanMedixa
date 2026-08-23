@@ -11,8 +11,9 @@ import MonitoringCard from '@/components/admin/MonitoringCard';
 import AnalyticsView from '@/components/admin/AnalyticsView';
 import CreateUserModal from '@/components/admin/CreateUserModal';
 import GuardrailsPanel from '@/components/admin/GuardrailsPanel';
+import ClinicRoomManagement from '@/components/admin/ClinicRoomManagement';
 
-type AdminMenuKey = 'overview' | 'users' | 'guardrails' | 'monitoring' | 'analytics' | 'audit';
+type AdminMenuKey = 'overview' | 'users' | 'clinic_rooms' | 'guardrails' | 'monitoring' | 'analytics' | 'audit';
 
 export default function AdminPage() {
   const { userName, userRole, loading, logout } = useAuth('admin');
@@ -22,11 +23,17 @@ export default function AdminPage() {
     auditLogs,
     analytics,
     monitoring,
+    clinicRooms,
     error,
     creatingUser,
+    savingClinicRoom,
     loadAdminData,
     toggleUserStatus,
     createUser,
+    createClinicRoom,
+    updateClinicRoom,
+    deleteClinicRoom,
+    toggleClinicRoomStatus,
   } = useAdmin();
 
   const [activeMenu, setActiveMenu] = useState<AdminMenuKey>('overview');
@@ -50,11 +57,13 @@ export default function AdminPage() {
   const menuItems = [
     { key: 'overview' as AdminMenuKey, label: 'Ikhtisar & Metrik', icon: '📊', desc: 'Ringkasan sistem & LLM' },
     { key: 'users' as AdminMenuKey, label: 'Manajemen Pengguna', icon: '👥', desc: `${users.length} akun dokter` },
+    { key: 'clinic_rooms' as AdminMenuKey, label: 'Manajemen Ruang Poli', icon: '🏥', desc: `${clinicRooms.length} ruangan poli` },
     { key: 'guardrails' as AdminMenuKey, label: 'AI Safety & Guardrails', icon: '🛡️', desc: 'Kebijakan & sensor PII' },
     { key: 'monitoring' as AdminMenuKey, label: 'Monitoring Sistem', icon: '🖥️', desc: 'SIMRS, Gemini, Qdrant' },
     { key: 'analytics' as AdminMenuKey, label: 'Analitik & Token', icon: '📈', desc: 'Metrik penggunaan & latensi' },
     { key: 'audit' as AdminMenuKey, label: 'Audit Trail & Log', icon: '📋', desc: 'Rekam jejak aktivitas' },
   ];
+
 
   return (
     <div className="flex flex-col h-screen bg-emerald-50 dark:bg-slate-950 text-emerald-950 dark:text-slate-100 overflow-hidden transition-colors">
@@ -170,8 +179,9 @@ export default function AdminPage() {
           {activeMenu === 'overview' && (
             <div className="space-y-8">
               {stats && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 md:gap-6">
                   <MetricCard label="Dokter Terdaftar" value={stats.total_doctors} color="emerald" icon="🩺" />
+                  <MetricCard label="Ruang Poli" value={stats.total_clinic_rooms ?? clinicRooms.length} color="emerald" icon="🏥" />
                   <MetricCard label="Total Pertanyaan AI" value={stats.total_queries_run} color="emerald" icon="✨" />
                   <MetricCard label="Token Gemini" value={stats.total_gemini_tokens} color="emerald" icon="⚡" />
                   <MetricCard label="LLM Aktif" value={stats.gemini_model_active} color="emerald" icon="🧠" />
@@ -185,6 +195,15 @@ export default function AdminPage() {
                 users={users}
                 onToggleStatus={toggleUserStatus}
                 onOpenCreateModal={() => setCreateUserOpen(true)}
+              />
+
+              <ClinicRoomManagement
+                clinicRooms={clinicRooms}
+                onCreateRoom={createClinicRoom}
+                onUpdateRoom={updateClinicRoom}
+                onDeleteRoom={deleteClinicRoom}
+                onToggleStatus={toggleClinicRoomStatus}
+                savingRoom={savingClinicRoom}
               />
 
               <AuditFeed logs={auditLogs} />
@@ -207,6 +226,27 @@ export default function AdminPage() {
               />
             </div>
           )}
+
+          {/* Section: Clinic Rooms */}
+          {activeMenu === 'clinic_rooms' && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-lg font-bold text-emerald-950 dark:text-white">Manajemen Ruangan Poliklinik</h2>
+                <p className="text-xs text-emerald-700 dark:text-slate-400">
+                  Kelola master data ruangan poli rawat jalan, penugasan dokter bertugas, spesialisasi, dan status operasional.
+                </p>
+              </div>
+              <ClinicRoomManagement
+                clinicRooms={clinicRooms}
+                onCreateRoom={createClinicRoom}
+                onUpdateRoom={updateClinicRoom}
+                onDeleteRoom={deleteClinicRoom}
+                onToggleStatus={toggleClinicRoomStatus}
+                savingRoom={savingClinicRoom}
+              />
+            </div>
+          )}
+
 
           {/* Section: Guardrails */}
           {activeMenu === 'guardrails' && <GuardrailsPanel />}

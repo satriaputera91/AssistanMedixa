@@ -14,6 +14,9 @@ from app.modules.admin.schemas import (
     UsageDailyPoint,
     MonitoringResponse,
     ServiceHealthSchema,
+    ClinicRoomAdminView,
+    CreateClinicRoomRequest,
+    UpdateClinicRoomRequest,
 )
 from app.modules.rag.rag_service import qdrant_rag_service
 
@@ -31,8 +34,10 @@ def get_admin_stats(current_user: TokenPayload = Depends(require_role(["admin"])
         total_chat_sessions=len(dbApplication.chat_sessions),
         total_queries_run=len(dbApplication.audit_logs),
         total_gemini_tokens=total_tokens,
-        gemini_model_active=settings.GEMINI_MODEL_NAME
+        gemini_model_active=settings.GEMINI_MODEL_NAME,
+        total_clinic_rooms=len(dbApplication.clinic_rooms),
     )
+
 
 
 @router.get("/analytics", response_model=UsageAnalyticsResponse)
@@ -129,3 +134,78 @@ def toggle_user_status(user_id: str, current_user: TokenPayload = Depends(requir
 @router.get("/audit-logs", response_model=List[AuditLogItem])
 def get_audit_logs(current_user: TokenPayload = Depends(require_role(["admin"]))):
     return [AuditLogItem(**log) for log in dbApplication.audit_logs]
+
+
+# ── Clinic Room / Poli Management Endpoints ─────────────────────────
+
+@router.get("/clinic-rooms", response_model=List[ClinicRoomAdminView])
+def list_admin_clinic_rooms(current_user: TokenPayload = Depends(require_role(["admin"]))):
+    """List all clinic rooms with assigned doctor metadata."""
+    rooms = dbApplication.get_all_clinic_rooms(include_assigned_doctors=True)
+    return [ClinicRoomAdminView(**r) for r in rooms]
+
+
+@router.post("/clinic-rooms", response_model=ClinicRoomAdminView)
+def create_admin_clinic_room(
+    request: CreateClinicRoomRequest, 
+    current_user: TokenPayload = Depends(require_role(["admin"]))
+):
+    """Create a new clinic room / poli."""
+    try:
+        new_room = dbApplication.create_clinic_room(request.model_dump())
+        return ClinicRoomAdminView(**new_room)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/clinic-rooms/{room_id}", response_model=ClinicRoomAdminView)
+def get_admin_clinic_room(
+    room_id: str, 
+    current_user: TokenPayload = Depends(require_role(["admin"]))
+):
+    """Get single clinic room detail."""
+    room = dbApplication.get_clinic_room(room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Ruangan poli tidak ditemukan.")
+    return ClinicRoomAdminView(**room)
+
+
+@router.put("/clinic-rooms/{room_id}", response_model=ClinicRoomAdminView)
+def update_admin_clinic_room(
+    room_id: str,
+    request: UpdateClinicRoomRequest,
+    current_user: TokenPayload = Depends(require_role(["admin"]))
+):
+    """Update an existing clinic room / poli."""
+    try:
+        updated = dbApplication.update_clinic_room(room_id, request.model_dump(exclude_unset=True))
+        if not updated:
+            raise HTTPException(status_code=404, detail="Ruangan poli tidak ditemukan.")
+        return ClinicRoomAdminView(**updated)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/clinic-rooms/{room_id}")
+def delete_admin_clinic_room(
+    room_id: str,
+    current_user: TokenPayload = Depends(require_role(["admin"]))
+):
+    """Delete a clinic room and unassign any active doctors."""
+    success = dbApplication.delete_clinic_room(room_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Ruangan poli tidak ditemukan.")
+    return {"status": "success", "message": f"Ruangan poli {room_id} berhasil dihapus.", "room_id": room_id}
+
+
+@router.post("/clinic-rooms/{room_id}/toggle-status", response_model=ClinicRoomAdminView)
+def toggle_admin_clinic_room_status(
+    room_id: str,
+    current_user: TokenPayload = Depends(require_role(["admin"]))
+):
+    """Toggle clinic room active/inactive status."""
+    updated = dbApplication.toggle_clinic_room_status(room_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Ruangan poli tidak ditemukan.")
+    return ClinicRoomAdminView(**updated)
+

@@ -6,9 +6,11 @@ from app.modules.rag.schemas import (
     KnowledgeListResponse, 
     RAGSearchRequest, 
     RAGSearchResponse,
-    RAGChunkResult
+    RAGChunkResult,
+    ExtractKeywordsRequest,
+    ExtractKeywordsResponse,
 )
-from app.modules.rag.rag_service import qdrant_rag_service
+from app.modules.rag.rag_service import qdrant_rag_service, extract_text_from_file_bytes
 
 router = APIRouter(prefix="/rag", tags=["RAG & Knowledge Management"])
 
@@ -43,12 +45,9 @@ async def upload_document_file(
     specialty: str = Form("General Medicine"),
     current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))
 ):
-    """Document File Upload: Uploads .txt, .md, .json files and indexes content into Qdrant."""
+    """Document File Upload: Uploads .pdf, .docx, .doc, .txt, .md, .json files and indexes content into Qdrant with Gemini keyword extraction."""
     content_bytes = await file.read()
-    try:
-        raw_text = content_bytes.decode("utf-8")
-    except UnicodeDecodeError:
-        raw_text = content_bytes.decode("latin-1", errors="ignore")
+    raw_text = extract_text_from_file_bytes(file.filename, content_bytes)
 
     ingested_doc = qdrant_rag_service.ingest_uploaded_file(
         filename=file.filename,
@@ -59,9 +58,31 @@ async def upload_document_file(
     
     return {
         "status": "success",
-        "message": f"File '{file.filename}' uploaded and indexed into Qdrant ({ingested_doc['chunks_count']} chunks)",
-        "item": ingested_doc
+        "message": f"File '{file.filename}' uploaded, keywords extracted by Gemini, and indexed into Qdrant ({ingested_doc['chunks_count']} chunks)",
+        "item": ingested_doc,
+        "extracted_keywords": ingested_doc.get("keywords", [])
     }
+
+@router.post("/extract-keywords", response_model=ExtractKeywordsResponse)
+def extract_keywords_from_content(
+    request: ExtractKeywordsRequest,
+    current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))
+):
+    """Uses Gemini LLM to analyze text and extract relevant clinical keywords."""
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="Konten teks tidak boleh kosong.")
+    
+    keywords = qdrant_rag_service.extract_keywords(
+        text=request.text,
+        title=request.title,
+        max_keywords=request.max_keywords or 10
+    )
+    return ExtractKeywordsResponse(
+        status="success",
+        keywords=keywords,
+        count=len(keywords)
+    )
+
 
 @router.delete("/knowledge/{item_id}")
 def delete_knowledge_item(

@@ -83,5 +83,15 @@ export class RAGService {
   public static async search(request: RAGSearchRequest): Promise<RAGSearchResponse> {
     return ApiClient.post<RAGSearchResponse>('/rag/search', request);
   }
+
+  public static async extractKeywords(text: string, title?: string, maxKeywords: number = 10): Promise<string[]> {
+    const res = await ApiClient.post<{ status: string; keywords: string[]; count: number }>('/rag/extract-keywords', {
+      text,
+      title,
+      max_keywords: maxKeywords,
+    });
+    return res.keywords || [];
+  }
 }
+
 

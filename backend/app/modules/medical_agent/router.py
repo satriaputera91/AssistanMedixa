@@ -914,8 +914,8 @@ async def execute_agent_chat_stream(
 
 @router.get("/clinic-rooms")
 def list_clinic_rooms(current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))):
-    """Returns all available clinic rooms / poli for doctor room assignment."""
-    return list(dbApplication.clinic_rooms.values())
+    """Returns all active clinic rooms / poli for doctor room assignment."""
+    return [r for r in dbApplication.clinic_rooms.values() if r.get("status", "active") == "active"]
 
 
 @router.get("/clinic-rooms/selected")
@@ -935,9 +935,14 @@ def select_clinic_room(
 ):
     """Set the doctor's active clinic room / poli."""
     room_id = payload.get("room_id", "")
-    if room_id and room_id not in dbApplication.clinic_rooms:
-        raise HTTPException(status_code=404, detail="Ruangan poli tidak ditemukan.")
+    if room_id:
+        room = dbApplication.clinic_rooms.get(room_id)
+        if not room:
+            raise HTTPException(status_code=404, detail="Ruangan poli tidak ditemukan.")
+        if room.get("status") != "active":
+            raise HTTPException(status_code=400, detail="Ruangan poli sedang tidak aktif atau dalam pemeliharaan.")
     dbApplication.doctor_selected_room[current_user.sub] = room_id
     room = dbApplication.clinic_rooms.get(room_id)
     return {"status": "ok", "selected_room": room}
+
 

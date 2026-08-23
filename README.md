@@ -8,7 +8,7 @@
 [![Qdrant](https://img.shields.io/badge/Qdrant-Vector_RAG-DC2626.svg?style=for-the-badge&logo=qdrant&logoColor=white)](https://qdrant.tech/)
 [![Next.js](https://img.shields.io/badge/Next.js-14_App_Router-000000.svg?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5+-3178C6.svg?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Version](https://img.shields.io/badge/Release-v1.3.0-blue.svg?style=for-the-badge)](VERSION_NOTES.md)
+[![Version](https://img.shields.io/badge/Release-v1.4.0-blue.svg?style=for-the-badge)](VERSION_NOTES.md)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
 
 **Platform Asisten Klinis AI Berbasis Agentic Architecture (FastAPI, LangGraph, Model Context Protocol & Google Gemini)**
@@ -37,12 +37,16 @@ Sistem dibangun dengan arsitektur **Modular Monolith** berkinerja tinggi, mengin
 
 - 🧠 **Autonomous Medical Agent (LangGraph)**
   - State machine workflow terstruktur: Anamnesis → Differential Diagnosis → SOAP/CPPT Generation → Medication Recommendation → Red Flags Detection → Safety Guardrail Verification.
+  - Alur **Pencarian Vector DB Wajib**: Setiap konsultasi medis umum secara otomatis melewati tahap pencarian semantik vektor Qdrant & Evidence-Based Literature sebelum sintesis respons.
   - Streaming respons real-time (Server-Sent Events) dengan visualisasi langkah penalaran AI.
 - 🔌 **Model Context Protocol (MCP) untuk SIMRS**
   - Standardized tool integration untuk membaca riwayat rekam medis (EMR), hasil laboratorium, alergi obat, dan stok farmasi rumah sakit.
-- 📚 **Clinical Knowledge Vector RAG Engine (Qdrant)**
+- 📚 **Clinical Knowledge Vector RAG Engine (Qdrant) & Dokumen PDF/DOCX**
   - Mesin pencarian semantik panduan praktik klinis (PPK), formularium nasional, diagnosis kerja, dan basis pengetahuan interaksi obat menggunakan **Qdrant Vector DB** dan **Gemini Embeddings**.
-  - Bebas percabangan statis (*no hardcoded conditions*), seluruh evaluasi klinis mengambil evidensi literatur dari Qdrant RAG.
+  - Dukungan unggah berkas dokumen `.pdf` dan `.docx` dengan ekstraksi teks, pembentukan kata kunci otomatis, dan chunking dokumen ke Vector DB.
+- 🏥 **Manajemen Ruang Poli Klinis (Clinic Room Management)**
+  - Panel administrasi untuk mengelola ruangan poli (Penyakit Dalam, Jantung, Bedah, Anak, dll.) lengkap dengan kapasitas antrean harian dan status aktif.
+  - Integrasi penugasan dokter jaga dan penyaringan daftar pasien aktif berdasarkan poli terpilih.
 - 🎙️ **Multimodal Audio Consultation & Temp SOAP Storage**
   - Transkripsi dan ekstraksi poin penting konsultasi verbal dokter-pasien secara instan menggunakan Google Gemini Multimodal.
   - Penyimpanan terstruktur SOAP sementara (`temp_soaps`) pada basis data relasional sebelum dikonfirmasi dan dikirimkan ke SIMRS.
@@ -138,7 +142,7 @@ AssistanMedixa/
 │   │   │       ├── initial_knowledge.py  # 21 Clinical reference knowledge documents
 │   │   │       └── rag_service.py        # Dedicated Qdrant RAG service
 │   │   └── main.py                # FastAPI entry point & middleware
-│   ├── tests/                     # Automated test suites (39 unit tests)
+│   ├── tests/                     # Automated test suites (40 unit tests)
 │   ├── run.sh                     # Backend launch script
 │   └── .env.example               # Template environment variable backend
 │
@@ -151,10 +155,10 @@ AssistanMedixa/
 │   │   ├── layout.tsx             # Root layout & Theme provider
 │   │   └── page.tsx               # Landing & Redirects
 │   ├── components/                # Reusable UI Components
-│   │   ├── admin/                 # Admin charts, audit feeds, user tables
+│   │   ├── admin/                 # Admin charts, audit feeds, user tables, clinic room management
 │   │   ├── chat/                  # Chat window, SOAP/CPPT editor, Audio recorder, Draft RME
 │   │   ├── common/                # Navbar, modals, metrics card
-│   │   └── knowledge/             # Document uploader, table & search explorer
+│   │   └── knowledge/             # Document uploader (PDF/DOCX), table & search explorer
 │   ├── hooks/                     # Custom React Hooks
 │   ├── services/                  # API Client Services
 │   ├── tailwind.config.js         # Tailwind styling configuration
@@ -234,10 +238,13 @@ AssistanMedixa/
 | :--- | :--- | :--- | :--- |
 | **Auth** | `POST` | `/api/v1/auth/login` | Otentikasi dan penerbitan JWT Access Token |
 | **Auth** | `GET` | `/api/v1/auth/me` | Informasi profil pengguna yang sedang login |
-| **Medical Agent** | `POST` | `/api/v1/medical-agent/chat` | Eksekusi penalaran LangGraph Medical Agent |
-| **Medical Agent** | `POST` | `/api/v1/medical-agent/chat/stream` | Stream real-time respons & reasoning steps |
-| **Chat & STT** | `POST` | `/api/v1/chat/audio/transcribe` | Transkripsi audio konsultasi dokter via Gemini STT |
-| **RAG** | `POST` | `/api/v1/rag/search` | Pencarian pedoman klinis & literatur obat |
+| **Medical Agent** | `POST` | `/api/v1/agent/chat` | Eksekusi penalaran LangGraph Medical Agent |
+| **Medical Agent** | `POST` | `/api/v1/agent/chat/stream` | Stream real-time respons & reasoning steps |
+| **Poli / Clinic Rooms** | `GET` / `POST` | `/api/v1/admin/clinic-rooms` | CRUD manajemen ruangan poli klinis |
+| **Poli / Clinic Rooms** | `POST` | `/api/v1/agent/clinic-rooms/select` | Pemilihan ruangan poli aktif dokter |
+| **Chat & STT** | `POST` | `/api/v1/agent/chat/audio` | Transkripsi audio konsultasi dokter & SOAP Temp via Gemini STT |
+| **RAG & Knowledge** | `POST` | `/api/v1/rag/search` | Pencarian pedoman klinis & literatur obat |
+| **RAG & Knowledge** | `POST` | `/api/v1/rag/upload-file` | Ekstraksi & indexing dokumen pedoman klinis (PDF/DOCX) |
 | **MCP SIMRS** | `POST` | `/api/v1/mcp/execute` | Eksekusi tool pemanggilan data SIMRS |
 | **Guardrails** | `POST` | `/api/v1/guardrails/verify` | Evaluasi kepatuhan keselamatan klinis |
 | **Health** | `GET` | `/api/health` | Healthcheck status backend dan AI service |

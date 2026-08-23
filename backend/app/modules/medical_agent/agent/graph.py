@@ -114,14 +114,21 @@ def node_execute_tools(state: MedicalAgentState) -> MedicalAgentState:
         rag_search_query = f"{query} {disease}".strip()
 
     rag_res = tool_vector_rag_search(rag_search_query, top_k=3)
-    if rag_res and isinstance(rag_res, list):
+    if rag_res and isinstance(rag_res, list) and len(rag_res) > 0:
         rag_chunks = rag_res
         score_info = ", ".join([f"{c.get('title', 'Ref')} (Score: {c.get('reranked_score', c.get('score', 0.85))})" for c in rag_chunks])
         steps.append({
-            "step_name": "Retrieval Augmenation Generation",
+            "step_name": "Retrieval Augmentation Generation (Qdrant Vector DB)",
             "description": "Pencarian semantik vektor Qdrant + validasi relevansi klinis.",
             "status": "success",
             "result": f"Retrieved {len(rag_chunks)} top chunks: {score_info}"
+        })
+    else:
+        steps.append({
+            "step_name": "Retrieval Augmentation Generation (Qdrant Vector DB)",
+            "description": "Pencarian semantik pada basis data vektor Qdrant.",
+            "status": "success",
+            "result": "Pencarian vektor selesai (menggunakan basis pengetahuan umum)."
         })
 
     # Step 3C: Clinical Literature Guidelines Summary
@@ -161,10 +168,8 @@ def _route_planner(state: MedicalAgentState) -> str:
     detected_intent = state.get("detected_intent")
 
     if not patient_id or not patient_id.strip():
-        if detected_intent is None:
-            log_edge_transition("planner", "synthesis", condition="general consultation: no intent -> direct to synthesis")
-            return "synthesis"
-        log_edge_transition("planner", "tools", condition="general consultation: bypass all SIMRS read nodes -> direct to tools (RAG/KM)")
+        # General Medical Consultation: ALWAYS pass through Vector DB search (tools) before synthesis
+        log_edge_transition("planner", "tools", condition="general consultation: search vector db -> synthesis")
         return "tools"
 
     if detected_intent is None:

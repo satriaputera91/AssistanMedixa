@@ -65,6 +65,37 @@ class TestMedicalAgentScenarios(unittest.TestCase):
         step_names = [s["step_name"] for s in res["steps_executed"]]
         self.assertTrue(any("Planner" in name or "Conversation" in name for name in step_names))
 
+        # Verify workflow passes through Vector DB search before synthesis
+        self.assertTrue(any("Retrieval Augmentation Generation" in name for name in step_names))
+        self.assertTrue(any("Literature Search" in name for name in step_names))
+        
+        rag_idx = next(i for i, name in enumerate(step_names) if "Retrieval Augmentation Generation" in name)
+        synth_idx = next(i for i, name in enumerate(step_names) if "Synthesis" in name)
+        self.assertLess(rag_idx, synth_idx, "Vector DB search step must precede LLM synthesis")
+
+    def test_01b_general_conversation_passes_through_vector_db_search(self):
+        """Scenario 1b: General clinical query without patient selected routes through Vector DB search before synthesis."""
+        state: MedicalAgentState = {
+            "messages": [{"role": "user", "content": "Bagaimana rekomendasi tatalaksana awal gastritis erosif?"}],
+            "patient_id": "",
+            "user_query": "Bagaimana rekomendasi tatalaksana awal gastritis erosif?",
+            "workflow_type": "text",
+            "steps_executed": [],
+            "final_synthesis": ""
+        }
+        config = {"configurable": {"thread_id": "scenario-01b-general-gastritis"}}
+        res = medical_agent_graph.invoke(state, config=config)
+
+        self.assertIn("final_synthesis", res)
+        self.assertTrue(len(res["final_synthesis"]) > 50)
+        
+        step_names = [s["step_name"] for s in res["steps_executed"]]
+        self.assertTrue(any("Retrieval Augmentation Generation" in name for name in step_names))
+        
+        rag_idx = next(i for i, name in enumerate(step_names) if "Retrieval Augmentation Generation" in name)
+        synth_idx = next(i for i, name in enumerate(step_names) if "Synthesis" in name)
+        self.assertLess(rag_idx, synth_idx, "Vector DB search must execute before synthesis in general consultation mode")
+
     def test_02_patient_history_and_demographics_scenario(self):
         """Scenario 2: FAQ 1 - Retrieve patient demographics from SIMRS."""
         state: MedicalAgentState = {

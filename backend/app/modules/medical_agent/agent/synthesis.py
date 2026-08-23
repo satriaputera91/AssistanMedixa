@@ -537,7 +537,7 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
         "interpretasi klinis", "tanda bahaya klinis", "bukti klinis", "populasi khusus",
         "konseling pasien", "meta-analisis", "studi klinis", "konsensus medis", "literatur",
         "kriteria diagnostik", "renal dosing", "hepatic dosing", "ddi mayor", "biomarker",
-        "penyakit", "obat", "dosis", "guideline"
+        "penyakit", "obat", "dosis", "guideline","deteksi","tanda bahaya"
     ]) and not any(p in query_lower for p in ["pasien ini", "simrs", "rme", "mrn", "cppt", "rekam medis pasien"])
 
     is_general_full_eval = not is_general_knowledge_query and any(phrase in query_lower for phrase in ["evaluasi lengkap", "laporan lengkap", "semua data", "evaluasi klinis terpadu", "ringkasan lengkap", "konsultasi lengkap", "seluruh pemeriksaan"])
@@ -566,6 +566,7 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
             temp_rec = temp_list[0]
 
     if detected_intent is None and not is_general_knowledge_query:
+        logger.debug("No patient data found")   
         prompt_context = f"Doctor Query: {query}\n"
         system_instruction = (
             "Anda adalah Asisten AI Medis Klinis (Medical Co-Pilot) yang santun, profesional, dan ramah. "
