@@ -1,12 +1,22 @@
 from typing import Dict, Any, List, Optional
 from app.modules.rag.rag_service import qdrant_rag_service
 
-def tool_vector_rag_search(query: str, top_k: int = 3, category_filter: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Performs semantic vector search across validated medical guidelines and literature using Qdrant."""
+def tool_vector_rag_search(
+    query: str, 
+    top_k: int = 3, 
+    category_filter: Optional[str] = None,
+    similarity_threshold: float = 0.5
+) -> List[Dict[str, Any]]:
+    """Performs hybrid BM25 + semantic vector search across validated medical guidelines and literature using Qdrant with threshold > 0.5."""
     if not query or not query.strip():
         return []
     try:
-        results = qdrant_rag_service.search(query=query, top_k=top_k, category_filter=category_filter)
+        results = qdrant_rag_service.search(
+            query=query, 
+            top_k=top_k, 
+            category_filter=category_filter,
+            similarity_threshold=similarity_threshold
+        )
         formatted_chunks = []
         for r in results:
             payload = r.get("payload", {})
@@ -21,7 +31,10 @@ def tool_vector_rag_search(query: str, top_k: int = 3, category_filter: Optional
                 "chunk_snippet": snippet[:400],
                 "parent_content": payload.get("parent_content") or payload.get("content") or snippet,
                 "score": r.get("score", 0.85),
-                "reranked_score": r.get("reranked_score", 0.90)
+                "vector_score": r.get("vector_score", r.get("score", 0.85)),
+                "bm25_score": r.get("bm25_score", 0.0),
+                "reranked_score": r.get("reranked_score", 0.90),
+                "boost_applied": r.get("boost_applied", 0.0)
             })
         return formatted_chunks
     except Exception:
@@ -32,7 +45,7 @@ def tool_get_clinical_literature_summary(query: str) -> str:
     if not query or not query.strip():
         return ""
     try:
-        chunks = tool_vector_rag_search(query, top_k=2)
+        chunks = tool_vector_rag_search(query, top_k=3)
         if chunks:
             summaries = [f"• {c['title']} ({c['specialty']}): {c['chunk_snippet']}" for c in chunks]
             return "\n".join(summaries)

@@ -1,4 +1,4 @@
-from app.modules.medical_agent.skills.output_schemas import (
+from app.modules.medical_agent.output_schemas import (
     VitalSignsData,
     LabItemData,
     PatientDemographicsData,
@@ -37,6 +37,9 @@ from app.modules.medical_agent.skills.audio_soap import (
     node_audio_transcription,
     node_audio_soap_summary
 )
+from app.modules.medical_agent.skills.planner import node_planner
+from app.modules.medical_agent.skills.synthesis import node_gemini_synthesis
+from app.modules.medical_agent.skills.validator import node_validate_output
 
 __all__ = [
     "VitalSignsData",
@@ -65,5 +68,8 @@ __all__ = [
     "node_km_red_flag_detection",
     "node_km_disease_explanations",
     "node_audio_transcription",
-    "node_audio_soap_summary"
+    "node_audio_soap_summary",
+    "node_planner",
+    "node_gemini_synthesis",
+    "node_validate_output"
 ]

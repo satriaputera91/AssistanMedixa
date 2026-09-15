@@ -34,7 +34,7 @@ export default function WorkflowExpandable({ steps }: WorkflowExpandableProps) {
       {isOpen && (
         <div className="mt-2.5 space-y-2 p-3 rounded-xl bg-emerald-50/50 dark:bg-slate-950/60 border border-emerald-200/70 dark:border-slate-800 text-xs animate-in fade-in slide-in-from-top-1 duration-200">
           <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-400 mb-1 flex items-center justify-between">
-            <span>Rincian Eksekusi Agen LangGraph & SIMRS MCP</span>
+            <span>Rincian Eksekusi Agen LangGraph & SIMRS / Satu Sehat</span>
             <span className="text-[9px] font-mono text-emerald-600 dark:text-slate-500">Audit Trail</span>
           </div>
 
@@ -56,11 +56,10 @@ export default function WorkflowExpandable({ steps }: WorkflowExpandableProps) {
                     </div>
 
                     <span
-                      className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider ${
-                        isSuccess
+                      className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider ${isSuccess
                           ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
                           : 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                      }`}
+                        }`}
                     >
                       {step.status}
                     </span>

@@ -40,7 +40,7 @@ export default function KnowledgeForm({ onSubmit, submitting }: KnowledgeFormPro
         }
         setFeedback({
           type: 'success',
-          message: `✨ Berhasil mengekstrak ${extracted.length} kata kunci klinis dengan AI Gemini.`,
+          message: `✨ Berhasil mengekstrak ${extracted.length} kata kunci klinis dengan AI Generative AI.`,
         });
       } else {
         setFeedback({
@@ -107,18 +107,17 @@ export default function KnowledgeForm({ onSubmit, submitting }: KnowledgeFormPro
         </span>
       </div>
       <p className="text-xs text-emerald-700 dark:text-slate-400 mb-4">
-        Tambahkan pengetahuan medis berkode ICD-10 / RxNorm atau ekstrak kata kunci otomatis dengan AI Gemini.
+        Tambahkan pengetahuan medis berkode ICD-10 / RxNorm atau ekstrak kata kunci otomatis dengan AI Generative AI.
       </p>
 
       {feedback && (
         <div
-          className={`mb-4 p-3 rounded-2xl border text-xs flex items-center justify-between ${
-            feedback.type === 'success'
+          className={`mb-4 p-3 rounded-2xl border text-xs flex items-center justify-between ${feedback.type === 'success'
               ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-300'
               : feedback.type === 'info'
-              ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-300 dark:border-blue-800 text-blue-900 dark:text-blue-300'
-              : 'bg-red-50 dark:bg-red-950/40 border-red-300 dark:border-red-800 text-red-700 dark:text-red-300'
-          }`}
+                ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-300 dark:border-blue-800 text-blue-900 dark:text-blue-300'
+                : 'bg-red-50 dark:bg-red-950/40 border-red-300 dark:border-red-800 text-red-700 dark:text-red-300'
+            }`}
         >
           <div className="flex items-center gap-2">
             <span>{feedback.type === 'success' ? '✅' : feedback.type === 'info' ? 'ℹ️' : '⚠️'}</span>
@@ -261,12 +260,12 @@ export default function KnowledgeForm({ onSubmit, submitting }: KnowledgeFormPro
               {extractingKeywords ? (
                 <>
                   <span className="animate-spin">⏳</span>
-                  <span>Menganalisis dengan Gemini…</span>
+                  <span>Menganalisis dengan Generative AI…</span>
                 </>
               ) : (
                 <>
                   <span>✨</span>
-                  <span>Ekstrak Otomatis dg Gemini AI</span>
+                  <span>Ekstrak Otomatis dg Generative AI AI</span>
                 </>
               )}
             </button>

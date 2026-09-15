@@ -459,6 +459,9 @@ class OutputValidationReport(BaseModel):
     alerts: List[str] = Field(default_factory=list)
     remediation_applied: bool = False
     details: Dict[str, Any] = Field(default_factory=dict)
+    round_number: int = 1
+    needs_refinement: bool = False
+    refinement_feedback: Optional[str] = None
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 
@@ -466,7 +469,7 @@ class OutputValidator:
     """
     Multi-stage Clinical Grounding & Output Verification Engine.
     Ensures LLM generations strictly adhere to grounding data, patient allergies,
-    clinical safety guidelines, and mandatory clinical disclaimers.
+    clinical safety guidelines, and mandatory clinical disclaimers with 3-round feedback refinement.
     """
 
     @classmethod
@@ -480,7 +483,9 @@ class OutputValidator:
         simrs_anamnesis: Optional[Dict[str, Any]] = None,
         simrs_labs: Optional[Dict[str, Any]] = None,
         drug_safety: Optional[Dict[str, Any]] = None,
-        structured_model: Optional[BaseModel] = None
+        structured_model: Optional[BaseModel] = None,
+        round_number: int = 1,
+        max_rounds: int = 3
     ) -> tuple[str, OutputValidationReport]:
         alerts: List[str] = []
         details: Dict[str, Any] = {}
@@ -536,6 +541,22 @@ class OutputValidator:
             alerts.append("AUTO-REMEDIATION: Menambahkan disclaimer medis resmi di akhir laporan klinis.")
             score = max(score, 0.95)
 
+        # 4. Determine Multi-Round Refinement Need (Loop 3 Rounds)
+        needs_refinement = False
+        refinement_feedback = None
+
+        if round_number < max_rounds:
+            # Check if there are clinical issues or room for depth polish
+            if score < 0.98 or alerts or len(alerts) > 0:
+                needs_refinement = True
+                critique_points = []
+                if alerts:
+                    critique_points.append(f"Perbaiki isu alergi/kontraindikasi: {'; '.join(alerts)}")
+                if details.get("demographics_anomaly"):
+                    critique_points.append(f"Pastikan identitas pasien '{simrs_profile.get('full_name', '')}' tertera dengan jelas.")
+                critique_points.append("Pertajam rekomendasi dosis dengan mempertimbangkan fungsi ginjal (eGFR) dan sertakan edukasi monitoring serial.")
+                refinement_feedback = " | ".join(critique_points)
+
         is_valid = score >= 0.70
         status = "PASSED" if is_valid else "FAILED_CRITICAL_VALIDATION"
         verdict = "VALID" if is_valid else "INVALID_POTENTIAL_HAZARD"
@@ -547,7 +568,10 @@ class OutputValidator:
             validation_score=round(max(score, 0.0), 2),
             alerts=alerts,
             remediation_applied=remediation_applied,
-            details=details
+            details=details,
+            round_number=round_number,
+            needs_refinement=needs_refinement,
+            refinement_feedback=refinement_feedback
         )
 
         return final_text, report

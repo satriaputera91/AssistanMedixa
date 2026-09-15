@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, Any, List
 from app.modules.medical_agent.context.state import MedicalAgentState
-from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
+from app.modules.medical_agent.logging_utils import log_node_start, log_node_end
 from app.modules.medical_agent.tools.clinical_tools import tool_generate_med_generation
 
 def node_km_medication_recommendation(state: MedicalAgentState) -> MedicalAgentState:

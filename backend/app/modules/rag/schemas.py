@@ -36,17 +36,20 @@ class RAGSearchRequest(BaseModel):
     query: str
     top_k: int = 3
     category_filter: Optional[str] = None
+    similarity_threshold: Optional[float] = 0.5
 
 class RAGChunkResult(BaseModel):
     title: str
     category: str
     specialty: str
-    icd10_code: Optional[str]
-    rxnorm_code: Optional[str]
-    evidence_level: Optional[str]
+    icd10_code: Optional[str] = None
+    rxnorm_code: Optional[str] = None
+    evidence_level: Optional[str] = None
     reranked_score: float
     boost_applied: float
     chunk_snippet: str
+    vector_score: Optional[float] = None
+    bm25_score: Optional[float] = None
 
 class RAGSearchResponse(BaseModel):
     status: str

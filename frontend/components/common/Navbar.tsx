@@ -35,11 +35,11 @@ export default function Navbar({ userName, userRole, onLogout, activePage }: Nav
         {/* Logo & Title */}
         <Link href={effectiveRole === 'admin' ? '/admin' : '/doctor'} className="flex items-center gap-2.5 sm:gap-3 group">
           <span className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-emerald-700 via-emerald-600 to-emerald-800 dark:from-emerald-400 dark:via-teal-300 dark:to-emerald-500 tracking-tight group-hover:opacity-90 transition-opacity">
-            🏥 AIMedical
+            🏥 AssistantMedixa
           </span>
           <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-slate-800 border border-emerald-200 dark:border-slate-700">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300">SIMRS MCP</span>
+            <span className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300">SIMRS / Satu Sehat</span>
           </div>
         </Link>
 
@@ -51,11 +51,10 @@ export default function Navbar({ userName, userRole, onLogout, activePage }: Nav
               <Link
                 key={item.key}
                 href={item.href}
-                className={`px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                  activePage === item.key
-                    ? 'bg-emerald-600 dark:bg-emerald-500 text-white shadow-sm'
-                    : 'text-emerald-800 dark:text-slate-300 hover:text-emerald-950 dark:hover:text-white hover:bg-emerald-100/70 dark:hover:bg-slate-800'
-                }`}
+                className={`px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${activePage === item.key
+                  ? 'bg-emerald-600 dark:bg-emerald-500 text-white shadow-sm'
+                  : 'text-emerald-800 dark:text-slate-300 hover:text-emerald-950 dark:hover:text-white hover:bg-emerald-100/70 dark:hover:bg-slate-800'
+                  }`}
               >
                 {item.label}
               </Link>

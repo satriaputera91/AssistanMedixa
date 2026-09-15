@@ -42,6 +42,9 @@ export function useAgentChat() {
   const [executing, setExecuting] = useState(false);
   const [steps, setSteps] = useState<any[]>([]);
   const [activeTempSOAP, setActiveTempSOAP] = useState<TempSOAPRecord | null>(null);
+  const [activeNode, setActiveNode] = useState<string | null>(null);
+  const [completedNodes, setCompletedNodes] = useState<string[]>([]);
+  const [latestSummary, setLatestSummary] = useState<string>('');
 
   const loadPatients = useCallback(async (roomId?: string) => {
     try {
@@ -102,13 +105,33 @@ export function useAgentChat() {
     setMessages(prev => [...prev, userMsg]);
     setExecuting(true);
     setSteps([]);
+    setActiveNode('planner');
+    setCompletedNodes([]);
+    setLatestSummary('Memulai alur penalaran klinis terintegrasi...');
 
     try {
-      const data = await AgentService.executeChat({
-        user_query: query,
-        patient_id: selectedPatient || null,
-        session_id: activeSessionId || null,
-      });
+      const data = await AgentService.executeChatStream(
+        {
+          user_query: query,
+          patient_id: selectedPatient || null,
+          session_id: activeSessionId || null,
+        },
+        (statusEv) => {
+          if (statusEv.node_name) {
+            setActiveNode(statusEv.node_name);
+            setCompletedNodes(prev => (prev.includes(statusEv.node_name!) ? prev : [...prev, statusEv.node_name!]));
+          }
+          if (statusEv.summary) {
+            setLatestSummary(statusEv.summary);
+          }
+          if (statusEv.step) {
+            setSteps(prev => {
+              const alreadyHas = prev.some(s => s.step_name === statusEv.step.step_name);
+              return alreadyHas ? prev : [...prev, statusEv.step];
+            });
+          }
+        }
+      );
 
       const aiMsg: ChatMessage = {
         role: 'assistant',
@@ -118,6 +141,9 @@ export function useAgentChat() {
         timestamp: new Date().toISOString(),
         metadata: {
           ...(data.soa_note ? { type: 'soa_note', note: data.soa_note } : {}),
+          ...(data.temp_soap ? { type: 'temp_soap', temp_soap: data.temp_soap } : {}),
+          hitl_required: data.hitl_required,
+          hitl_data: data.hitl_data,
           steps: data.steps_executed || [],
         },
       };
@@ -142,6 +168,9 @@ export function useAgentChat() {
       setMessages(prev => [...prev, errMsg]);
     } finally {
       setExecuting(false);
+      setTimeout(() => {
+        setActiveNode(null);
+      }, 3000);
     }
 
   }, [executing, selectedPatient, activeSessionId, loadSessions]);
@@ -349,6 +378,9 @@ export function useAgentChat() {
     messages,
     executing,
     steps,
+    activeNode,
+    completedNodes,
+    latestSummary,
     activeTempSOAP,
     loadPatients,
     loadSessions,

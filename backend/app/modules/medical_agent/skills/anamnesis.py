@@ -7,7 +7,7 @@ from app.modules.medical_agent.tools.simrs_tools import (
     tool_simrs_get_patient_anamnesis
 )
 from app.modules.medical_agent.tools.clinical_tools import tool_query_patient_ehr
-from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
+from app.modules.medical_agent.logging_utils import log_node_start, log_node_end
 from app.core.database import dbApplication
 
 def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
@@ -23,13 +23,15 @@ def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
 
     simrs_mrn = f"MRN-SIMRS-{patient_id.replace('P-', '')}" if (patient_id and patient_id.strip()) else None
 
+    is_demographics_only = state.get("detected_intent") == "1. Ambil Informasi Demografi Pasien (SIMRS / Satu Sehat)"
+
     if simrs_mrn:
         # Step 2A: Query SIMRS Demographics & Profile via MCP
         simrs_prof_res = tool_simrs_get_patient_profile(simrs_mrn)
         if simrs_prof_res.get("status") == "success":
             simrs_profile = simrs_prof_res["profile"]
             steps.append({
-                "step_name": "1. Ambil Informasi Demografi Pasien (SIMRS MCP)",
+                "step_name": "1. Ambil Informasi Demografi Pasien (SIMRS / Satu Sehat)",
                 "description": f"Mengambil data identitas, demografi, NIK, dan BPJS pasien melalui Model Context Protocol ({simrs_mrn})",
                 "status": "success",
                 "result": {
@@ -47,54 +49,55 @@ def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
             })
         else:
             steps.append({
-                "step_name": "1. Ambil Informasi Demografi Pasien (SIMRS MCP)",
+                "step_name": "1. Ambil Informasi Demografi Pasien (SIMRS / Satu Sehat)",
                 "description": f"Mencari profil demografi pasien di SIMRS ({simrs_mrn})",
                 "status": "info",
                 "result": f"Data profil demografi untuk {simrs_mrn} tidak ditemukan di SIMRS."
             })
             
-        # Optional: Query history for downstream nodes if needed
-        simrs_hist_res = tool_simrs_get_patient_history(simrs_mrn)
-        if simrs_hist_res.get("status") == "success":
-            simrs_history = simrs_hist_res["history"]
+        if not is_demographics_only:
+            # Optional: Query history for downstream nodes if needed
+            simrs_hist_res = tool_simrs_get_patient_history(simrs_mrn)
+            if simrs_hist_res.get("status") == "success":
+                simrs_history = simrs_hist_res["history"]
 
-        # Step 2C: Query Local EHR Database (Diagnoses, Allergies, Medications, Labs)
-        if patient_id:
-            ehr_res = tool_query_patient_ehr(patient_id)
-            if ehr_res.get("status") == "success":
-                ehr_result = ehr_res["data"]
-                steps.append({
-                    "step_name": "Sinkronisasi Rekam Medis EHR Pasien",
-                    "description": f"Mengambil rekam medis lengkap (Diagnosis, Alergi, Terapi Obat, Hasil Lab) untuk pasien {patient_id}",
-                    "status": "success",
-                    "result": {
-                        "nama": ehr_result.get("name"),
-                        "diagnosa": ehr_result.get("diagnoses", []),
-                        "alergi": ehr_result.get("allergies", []),
-                        "obat_aktif": [m["name"] for m in ehr_result.get("current_medications", [])],
-                        "lab_terbaru": ehr_result.get("recent_labs", {})
-                    }
-                })
+            # Step 2C: Query Local EHR Database (Diagnoses, Allergies, Medications, Labs)
+            if patient_id:
+                ehr_res = tool_query_patient_ehr(patient_id)
+                if ehr_res.get("status") == "success":
+                    ehr_result = ehr_res["data"]
+                    steps.append({
+                        "step_name": "Sinkronisasi Rekam Medis EHR Pasien",
+                        "description": f"Mengambil rekam medis lengkap (Diagnosis, Alergi, Terapi Obat, Hasil Lab) untuk pasien {patient_id}",
+                        "status": "success",
+                        "result": {
+                            "nama": ehr_result.get("name"),
+                            "diagnosa": ehr_result.get("diagnoses", []),
+                            "alergi": ehr_result.get("allergies", []),
+                            "obat_aktif": [m["name"] for m in ehr_result.get("current_medications", [])],
+                            "lab_terbaru": ehr_result.get("recent_labs", {})
+                        }
+                    })
 
-        # Step 2D: Check Temp SOAP records in Application Database (e.g. from Audio Recording / Consultation Draft)
-        if patient_id:
-            temp_list = dbApplication.list_temp_soap(patient_id=patient_id, limit=1)
-            if temp_list:
-                temp_soap_data = temp_list[0]
-                sc = temp_soap_data.get("soap_content") or {}
-                steps.append({
-                    "step_name": "Sinkronisasi SOAP Temp & Rekaman Konsultasi",
-                    "description": f"Ditemukan data SOAP sementara aktif ({temp_soap_data.get('temp_id')}) untuk integrasi analisis klinis komprehensif",
-                    "status": "success",
-                    "result": {
-                        "temp_id": temp_soap_data.get("temp_id"),
-                        "status": temp_soap_data.get("status"),
-                        "audio_filename": temp_soap_data.get("audio_filename"),
-                        "keluhan_terkini": sc.get("subjective", "-")[:80],
-                        "asesmen_sementara": sc.get("assessment", "-")[:80],
-                        "rencana_terapi": sc.get("plan", "-")[:80]
-                    }
-                })
+            # Step 2D: Check Temp SOAP records in Application Database (e.g. from Audio Recording / Consultation Draft)
+            if patient_id:
+                temp_list = dbApplication.list_temp_soap(patient_id=patient_id, limit=1)
+                if temp_list:
+                    temp_soap_data = temp_list[0]
+                    sc = temp_soap_data.get("soap_content") or {}
+                    steps.append({
+                        "step_name": "Sinkronisasi SOAP Temp & Rekaman Konsultasi",
+                        "description": f"Ditemukan data SOAP sementara aktif ({temp_soap_data.get('temp_id')}) untuk integrasi analisis klinis komprehensif",
+                        "status": "success",
+                        "result": {
+                            "temp_id": temp_soap_data.get("temp_id"),
+                            "status": temp_soap_data.get("status"),
+                            "audio_filename": temp_soap_data.get("audio_filename"),
+                            "keluhan_terkini": sc.get("subjective", "-")[:80],
+                            "asesmen_sementara": sc.get("assessment", "-")[:80],
+                            "rencana_terapi": sc.get("plan", "-")[:80]
+                        }
+                    })
 
         log_node_end("fetch_patient_history", f"SIMRS Profile: {bool(simrs_profile)} | History: {bool(simrs_history)} | Temp SOAP: {bool(temp_soap_data)}")
     else:
@@ -116,7 +119,7 @@ def node_fetch_patient_history(state: MedicalAgentState) -> MedicalAgentState:
     }
 
 def node_fetch_patient_anamnesis(state: MedicalAgentState) -> MedicalAgentState:
-    """Retrieves patient clinical anamnesis (Chief Complaint, RPS, RPD, RPK) from SIMRS MCP."""
+    """Retrieves patient clinical anamnesis (Chief Complaint, RPS, RPD, RPK) from SIMRS / Satu Sehat."""
     log_node_start("fetch_patient_anamnesis", state, icon="📝")
     patient_id = state.get("patient_id")
     steps = list(state.get("steps_executed", []))

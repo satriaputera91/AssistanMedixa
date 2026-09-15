@@ -66,6 +66,22 @@ export interface AgentChatResponse {
   temp_soap?: TempSOAPRecord | null;
   structured_output?: Record<string, any> | null;
   output_validation?: Record<string, any> | null;
+  hitl_required?: boolean;
+  hitl_data?: {
+    required: boolean;
+    type: string;
+    title: string;
+    options: Array<{
+      key: string;
+      label: string;
+      icon: string;
+      description: string;
+      action_type: 'record_audio' | 'upload_file' | 'manual_modal';
+    }>;
+    missing_subjective?: boolean;
+    missing_objective?: boolean;
+    patient_id?: string | null;
+  } | null;
 }
 
 
@@ -124,9 +140,107 @@ export interface ChatSession {
   messages: { role: string; content: string; timestamp: string; metadata?: Record<string, any> | null }[];
 }
 
+export interface WorkflowStatusEvent {
+  status: 'running' | 'node_completed' | 'error';
+  node_name?: string;
+  label?: string;
+  icon?: string;
+  phase?: string;
+  session_id?: string;
+  patient_id?: string | null;
+  summary?: string;
+  step?: any;
+  total_steps?: number;
+  timestamp: string;
+}
+
 export class AgentService {
   public static async executeChat(request: AgentChatRequest): Promise<AgentChatResponse> {
     return ApiClient.post<AgentChatResponse>('/agent/chat', request);
+  }
+
+  public static async executeChatStream(
+    request: AgentChatRequest,
+    onWorkflowStatus?: (event: WorkflowStatusEvent) => void,
+  ): Promise<AgentChatResponse> {
+    const token = ApiClient.getToken();
+    const response = await fetch('/api/v1/agent/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorDetail = 'Gagal melakukan stream konsultasi AI';
+      try {
+        const parsed = JSON.parse(errorText);
+        errorDetail = parsed.detail || parsed.message || errorDetail;
+      } catch {}
+      throw new Error(errorDetail);
+    }
+
+    if (!response.body) {
+      throw new Error('Response stream tidak tersedia.');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let finalResponse: AgentChatResponse | null = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split('\n\n');
+      buffer = blocks.pop() || '';
+
+      for (const block of blocks) {
+        if (!block.trim()) continue;
+
+        let eventType = 'message';
+        let dataStr = '';
+
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event:')) {
+            eventType = line.replace('event:', '').trim();
+          } else if (line.startsWith('data:')) {
+            dataStr += line.replace('data:', '').trim();
+          }
+        }
+
+        if (!dataStr) continue;
+
+        try {
+          const parsed = JSON.parse(dataStr);
+          if (eventType === 'workflow_status') {
+            if (onWorkflowStatus) {
+              onWorkflowStatus(parsed as WorkflowStatusEvent);
+            }
+          } else if (eventType === 'complete') {
+            finalResponse = parsed as AgentChatResponse;
+          } else if (eventType === 'error') {
+            throw new Error(parsed.error || 'Terjadi kesalahan pada alur proses AI');
+          }
+        } catch (e: any) {
+          if (eventType === 'error' || (e.message && e.message.includes('kesalahan'))) {
+            throw e;
+          }
+          console.error('Failed to parse SSE chunk:', e, dataStr);
+        }
+      }
+    }
+
+    if (!finalResponse) {
+      throw new Error('Stream selesai tanpa menerima respon final dari agen.');
+    }
+
+    return finalResponse;
   }
 
   public static async executeAudioChat(
@@ -188,6 +302,16 @@ export class AgentService {
   }
 
   // ── Temporary SOAP Pre-SIMRS Methods ──────────────────────────────
+
+  public static async createManualTempSOAP(payload: {
+    session_id: string;
+    patient_id?: string | null;
+    soap_content: TempSOAPContent;
+    raw_markdown?: string;
+    structured_output?: Record<string, any>;
+  }): Promise<TempSOAPRecord> {
+    return ApiClient.post<TempSOAPRecord>('/agent/soap-temp', payload);
+  }
 
   public static async getTempSOAPList(patientId?: string, status?: string): Promise<TempSOAPRecord[]> {
     const params = new URLSearchParams();

@@ -98,6 +98,26 @@ class TempSOAPUpdateRequest(BaseModel):
     raw_markdown: Optional[str] = None
     status: Optional[str] = None
 
+class CreateManualTempSOAPRequest(BaseModel):
+    session_id: str
+    patient_id: Optional[str] = None
+    soap_content: TempSOAPContentSchema
+    raw_markdown: Optional[str] = None
+    structured_output: Optional[Dict[str, Any]] = None
+
+class HITLOptionSchema(BaseModel):
+    key: str
+    label: str
+    icon: str
+    description: str
+    action_type: str  # "record_audio" | "upload_file" | "manual_modal"
+
+class HITLDataSchema(BaseModel):
+    required: bool = True
+    type: str = "missing_subjective_objective"
+    title: str = "Mohon maaf hasil anamnesis atau pemeriksaan belum disampaikan, Silahkan isi terlebih dahulu?"
+    options: List[HITLOptionSchema] = Field(default_factory=list)
+
 class TempSOAPCommitResponse(BaseModel):
     status: str
     message: str
@@ -116,3 +136,5 @@ class AgentChatResponse(BaseModel):
     temp_soap: Optional[TempSOAPRecordSchema] = None
     output_validation: Optional[OutputValidationSchema] = None
     structured_output: Optional[Dict[str, Any]] = None
+    hitl_required: Optional[bool] = False
+    hitl_data: Optional[Dict[str, Any]] = None

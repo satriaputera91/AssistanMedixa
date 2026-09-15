@@ -67,7 +67,7 @@ export default function CreateUserModal({
         <div className="mb-5">
           <h3 className="text-lg font-bold text-emerald-950">Tambah Akun Pengguna Baru</h3>
           <p className="text-xs text-emerald-700 mt-0.5">
-            Daftarkan akun dokter atau administrator AIMedical.
+            Daftarkan akun dokter atau administrator AssistantMedixa.
           </p>
         </div>
 
@@ -95,7 +95,7 @@ export default function CreateUserModal({
             <input
               type="email"
               required
-              placeholder="budi.santoso@aimedical.com"
+              placeholder="budi.santoso@AssistantMedixa.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-950 placeholder-emerald-400 focus:outline-none focus:border-emerald-500"

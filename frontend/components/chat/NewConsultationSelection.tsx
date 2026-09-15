@@ -49,7 +49,7 @@ export default function NewConsultationSelection({
     } catch (err: any) {
       setLookupError(
         err.message ||
-          `Data pasien dengan NIK/IHS/MRN '${searchQuery}' tidak ditemukan di server SIMRS.`
+        `Data pasien dengan NIK/IHS/MRN '${searchQuery}' tidak ditemukan di server SIMRS.`
       );
     } finally {
       setLoadingPatient(false);
@@ -157,7 +157,7 @@ export default function NewConsultationSelection({
               </h3>
             </div>
             <span className="text-[11px] text-emerald-700 dark:text-slate-400 font-medium">
-              Koneksi SIMRS MCP Aktif ✅
+              Koneksi SIMRS / Satu Sehat Aktif ✅
             </span>
           </div>
 

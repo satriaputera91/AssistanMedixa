@@ -8,10 +8,10 @@ export default function StepVisualizer({ executing }: StepVisualizerProps) {
   if (!executing) return null;
 
   const steps = [
-    { icon: '🔌', label: 'Menghubungkan protokol SIMRS MCP...' },
+    { icon: '🔌', label: 'Menghubungkan protokol SIMRS / Satu Sehat...' },
     { icon: '🎯', label: 'Mencari Qdrant RAG dan melakukan pemeringkatan ulang...' },
     { icon: '💊', label: 'Memeriksa interaksi obat...' },
-    { icon: '✨', label: 'Menyusun analisis klinis dengan Gemini...' },
+    { icon: '✨', label: 'Menyusun analisis klinis dengan Generative AI...' },
   ];
 
   return (

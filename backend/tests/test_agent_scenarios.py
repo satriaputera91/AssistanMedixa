@@ -13,7 +13,7 @@ backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-from app.modules.medical_agent.agent.graph import medical_agent_graph, build_medical_agent_graph
+from app.modules.medical_agent.graph import medical_agent_graph, build_medical_agent_graph
 from app.modules.medical_agent.context.state import MedicalAgentState
 from app.modules.medical_agent.context.schemas import (
     AgentChatRequest,
@@ -24,7 +24,7 @@ from app.modules.medical_agent.context.schemas import (
     SOANoteSchema
 )
 from app.modules.medical_agent.memory.checkpointer import get_sqlite_checkpointer
-from app.modules.medical_agent.skills.output_schemas import (
+from app.modules.medical_agent.output_schemas import (
     ClinicalSOAPOutputSchema,
     GeneralConsultationKnowledgeSchema,
     SIMRSTransactionReportSchema,
@@ -113,6 +113,13 @@ class TestMedicalAgentScenarios(unittest.TestCase):
         self.assertEqual(res["simrs_profile"]["mrn"], "MRN-SIMRS-10492")
         self.assertIn("Eleanor Vance", res["simrs_profile"]["full_name"])
         self.assertTrue(any(k in res["final_synthesis"] for k in ["Eleanor Vance", "MRN-SIMRS-10492", "Profil", "Demografi"]))
+        
+        step_names = [s["step_name"] for s in res["steps_executed"]]
+        self.assertEqual(step_names, [
+            "Agent Intelligence & Clinical Planner",
+            "1. Ambil Informasi Demografi Pasien (SIMRS / Satu Sehat)",
+            "LLM Clinical Synthesis"
+        ])
 
     def test_03_patient_anamnesis_retrieval_scenario(self):
         """Scenario 3: FAQ 2 - Retrieve patient clinical anamnesis from SIMRS."""
@@ -134,7 +141,7 @@ class TestMedicalAgentScenarios(unittest.TestCase):
         self.assertTrue(any(k in res["final_synthesis"] for k in ["Anamnesis", "Keluhan Utama", "ulu hati"]))
 
     def test_04_patient_labs_and_vitals_evaluation_scenario(self):
-        """Scenario 4: FAQ 3 - Evaluate serial laboratory values and vital signs via SIMRS MCP."""
+        """Scenario 4: FAQ 3 - Evaluate serial laboratory values and vital signs via SIMRS / Satu Sehat."""
         state: MedicalAgentState = {
             "messages": [{"role": "user", "content": "Evaluasi hasil lab serial, eGFR, dan tanda vital pasien"}],
             "patient_id": "P-10492",

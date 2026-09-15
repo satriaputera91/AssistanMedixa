@@ -6,7 +6,7 @@ from datetime import datetime
 from app.core.config import settings
 from app.modules.medical_agent.context.state import MedicalAgentState
 from app.core.database import dbApplication
-from app.modules.medical_agent.skills.output_schemas import (
+from app.modules.medical_agent.output_schemas import (
     VitalSignsData,
     LabItemData,
     PatientDemographicsData,
@@ -68,7 +68,8 @@ def _generate_fallback_synthesis(
     drug_findings: List[str], 
     lit_summary: str,
     rag_chunks: List[Dict[str, Any]],
-    error_note: str = ""
+    error_note: str = "",
+    detected_intent: Optional[str] = None
 ) -> Tuple[str, Optional[Dict[str, Any]]]:
     query_lower = query.lower()
     is_general_knowledge_query = any(phrase in query_lower for phrase in [
@@ -81,7 +82,16 @@ def _generate_fallback_synthesis(
 
     is_general_full_eval = not is_general_knowledge_query and any(phrase in query_lower for phrase in ["evaluasi lengkap", "laporan lengkap", "semua data", "evaluasi klinis terpadu", "ringkasan lengkap", "konsultasi lengkap", "seluruh pemeriksaan"])
     is_cppt_commit = any(k in query_lower for k in ["buat cppt", "kirim cppt", "kirim soap", "buat soap", "sinkronisasi cppt", "simpan cppt", "kirim/sinkronisasikan", "update simrs", "sync simrs", "commit emr", "kirim ke simrs", "kirim/sinkronisasi"])
-    is_patient_history_only = not is_general_full_eval and not is_cppt_commit and not is_general_knowledge_query and any(k in query_lower for k in ["ambil informasi riwayat", "ambil data profil", "profil demografi", "riwayat penyakit kronis", "rawat inap", "riwayat pasien", "informasi riwayat", "catatan perkembangan", "riwayat catatan", "s/o/a/p", "soap terakhir", "progress note", "riwayat dan demografi", "demografi pasien"])
+    is_patient_history_only = (
+        detected_intent == "1. Ambil Informasi Demografi Pasien (SIMRS / Satu Sehat)"
+        or (not is_general_full_eval and not is_cppt_commit and not is_general_knowledge_query and any(k in query_lower for k in [
+            "ambil informasi pasien", "informasi pasien", "ambil data pasien", "data pasien",
+            "ambil informasi demografi", "ambil informasi riwayat", "ambil data profil",
+            "profil demografi", "riwayat penyakit kronis", "rawat inap", "riwayat pasien",
+            "informasi riwayat", "catatan perkembangan", "riwayat catatan", "s/o/a/p",
+            "soap terakhir", "progress note", "riwayat dan demografi", "demografi pasien"
+        ]))
+    )
     is_anamnesis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["anamnesis", "keluhan", "rps", "rpd", "rpk"]) and not is_patient_history_only and not is_cppt_commit
     is_labs_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["lab", "laboratorium", "ttv", "tanda vital", "egfr", "uacr", "evaluasi hasil lab", "pemeriksaan simrs"]) and not is_patient_history_only and not is_anamnesis_only and not is_cppt_commit
     is_diagnosis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["diagnosis kerja", "diagnosis banding", "rekomendasi diagnosis pasien", "diagnosis pasien", "rekomendasi diagnosis", "kodefikasi icd", "icd-10"]) and not is_labs_only and not is_anamnesis_only and not is_patient_history_only and not is_cppt_commit
@@ -165,7 +175,7 @@ def _generate_fallback_synthesis(
 
     if is_patient_history_only:
         lines = []
-        lines.append("## 📋 Informasi Profil & Demografi Pasien (SIMRS MCP)\n")
+        lines.append("## 📋 Informasi Profil & Demografi Pasien (SIMRS / Satu Sehat)\n")
         if simrs_profile:
             lines.append("| Parameter Demografi | Keterangan Data SIMRS |")
             lines.append("| :--- | :--- |")
@@ -185,7 +195,7 @@ def _generate_fallback_synthesis(
 
     if is_anamnesis_only:
         lines = []
-        lines.append("## 📝 Data Anamnesis Pasien (SIMRS MCP)\n")
+        lines.append("## 📝 Data Anamnesis Pasien (SIMRS / Satu Sehat)\n")
         if simrs_anamnesis:
             lines.append("| Komponen Anamnesis | Keterangan Klinis Pasien |")
             lines.append("| :--- | :--- |")
@@ -509,8 +519,8 @@ def _generate_fallback_synthesis(
 
 
 def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
-    """Invokes Google Gemini LLM with rich MCP/RAG context or generates validated clinical schema."""
-    from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
+    """Invokes LLM with rich MCP/RAG context or generates validated clinical schema."""
+    from app.modules.medical_agent.logging_utils import log_node_start, log_node_end
     log_node_start("synthesis", state, icon="🩺")
     query = state.get("user_query", "")
     ehr_data = state.get("ehr_data")
@@ -542,7 +552,16 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
 
     is_general_full_eval = not is_general_knowledge_query and any(phrase in query_lower for phrase in ["evaluasi lengkap", "laporan lengkap", "semua data", "evaluasi klinis terpadu", "ringkasan lengkap", "konsultasi lengkap", "seluruh pemeriksaan"])
     is_cppt_commit = any(k in query_lower for k in ["buat cppt", "kirim cppt", "kirim soap", "buat soap", "sinkronisasi cppt", "simpan cppt", "kirim/sinkronisasikan", "update simrs", "sync simrs", "commit emr", "kirim ke simrs", "kirim/sinkronisasi"])
-    is_patient_history_only = not is_general_full_eval and not is_cppt_commit and not is_general_knowledge_query and any(k in query_lower for k in ["ambil informasi riwayat", "ambil data profil", "profil demografi", "riwayat penyakit kronis", "rawat inap", "riwayat pasien", "informasi riwayat", "catatan perkembangan", "riwayat catatan", "s/o/a/p", "soap terakhir", "progress note", "riwayat dan demografi", "demografi pasien"])
+    is_patient_history_only = (
+        state.get("detected_intent") == "1. Ambil Informasi Demografi Pasien (SIMRS / Satu Sehat)"
+        or (not is_general_full_eval and not is_cppt_commit and not is_general_knowledge_query and any(k in query_lower for k in [
+            "ambil informasi pasien", "informasi pasien", "ambil data pasien", "data pasien",
+            "ambil informasi demografi", "ambil informasi riwayat", "ambil data profil",
+            "profil demografi", "riwayat penyakit kronis", "rawat inap", "riwayat pasien",
+            "informasi riwayat", "catatan perkembangan", "riwayat catatan", "s/o/a/p",
+            "soap terakhir", "progress note", "riwayat dan demografi", "demografi pasien"
+        ]))
+    )
     is_anamnesis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["anamnesis", "keluhan", "rps", "rpd", "rpk"]) and not is_patient_history_only and not is_cppt_commit
     is_labs_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["lab", "laboratorium", "ttv", "tanda vital", "egfr", "uacr", "evaluasi hasil lab", "pemeriksaan simrs"]) and not is_patient_history_only and not is_anamnesis_only and not is_cppt_commit
     is_diagnosis_only = not is_general_full_eval and not is_general_knowledge_query and any(k in query_lower for k in ["diagnosis kerja", "diagnosis banding", "rekomendasi diagnosis pasien", "diagnosis pasien", "rekomendasi diagnosis", "kodefikasi icd", "icd-10"]) and not is_labs_only and not is_anamnesis_only and not is_patient_history_only and not is_cppt_commit
@@ -564,6 +583,83 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
         temp_list = dbApplication.list_temp_soap(patient_id=patient_id_for_soap, limit=1)
         if temp_list:
             temp_rec = temp_list[0]
+
+    # Check if this is a clinical recommendation request (Diagnosis, Medication, Procedure)
+    is_clinical_recommendation_request = (is_diagnosis_only or is_medication_only or is_procedure_only)
+    
+    if is_clinical_recommendation_request:
+        has_subjective = bool(
+            (simrs_anamnesis and (simrs_anamnesis.get("chief_complaint") or simrs_anamnesis.get("history_present_illness"))) or
+            (temp_rec and temp_rec.get("soap_content", {}).get("subjective") and temp_rec.get("soap_content", {}).get("subjective", "").strip() not in ["", "-", "None"]) or
+            (ehr_data and (ehr_data.get("diagnoses") or ehr_data.get("symptoms")))
+        )
+        has_objective = bool(
+            (simrs_labs and (simrs_labs.get("vital_signs") or simrs_labs.get("latest_labs"))) or
+            (temp_rec and temp_rec.get("soap_content", {}).get("objective") and temp_rec.get("soap_content", {}).get("objective", "").strip() not in ["", "-", "None"]) or
+            (ehr_data and (ehr_data.get("recent_labs") or ehr_data.get("vital_signs")))
+        )
+
+        if not has_subjective or not has_objective:
+            final_text = (
+                "## ⚠️ Data Anamnesis & Pemeriksaan Fisik Belum Tersedia\n\n"
+                "Mohon maaf Dokter, hasil **anamnesis (Subjektif)** atau **pemeriksaan klinis/laboratorium (Objektif)** pasien belum disampaikan atau belum tercatat dalam sistem.\n\n"
+                "Untuk dapat menyusun rekomendasi diagnosis kerja (ICD-10), terapi obat berbasis bukti (Renal Dosing), maupun rencana tindakan medis yang tepat dan aman bagi pasien, silakan lengkapi data klinis pasien terlebih dahulu melalui pilihan di bawah ini:\n\n"
+                "1. 🎙️ **Rekam Langsung**: Rekam percakapan konsultasi dokter-pasien secara langsung untuk transkripsi dan ekstraksi data klinis otomatis (Generative AI STT).\n"
+                "2. 📄 **Upload Berkas**: Unggah berkas audio rekaman konsultasi atau dokumen hasil pemeriksaan laboratorium/medis.\n"
+                "3. ✍️ **Input Manual**: Buka form multi-step untuk mengisi temuan Subjektif (keluhan) dan Objektif (observasi/lab/tanda vital), lalu simpan ke **SOAP Temporary Database**.\n\n"
+                "> *Silakan pilih salah satu opsi aksi di bawah untuk melanjutkan.*"
+            )
+            hitl_options = [
+                {
+                    "key": "audio_record",
+                    "label": "Rekam Langsung",
+                    "icon": "🎙️",
+                    "description": "Rekam suara konsultasi dokter-pasien via Generative AI STT & ekstraksi SOAP otomatis.",
+                    "action_type": "record_audio"
+                },
+                {
+                    "key": "file_upload",
+                    "label": "Upload Berkas",
+                    "icon": "📄",
+                    "description": "Unggah berkas rekaman audio, PDF hasil lab, atau resume dokumen medis.",
+                    "action_type": "upload_file"
+                },
+                {
+                    "key": "manual_input",
+                    "label": "Input Manual",
+                    "icon": "✍️",
+                    "description": "Form multi-step terstruktur (S/O/A/P) dan simpan ke SOAP Temporary Database.",
+                    "action_type": "manual_modal"
+                }
+            ]
+            hitl_data = {
+                "required": True,
+                "type": "missing_subjective_objective",
+                "title": "Mohon maaf hasil anamnesis atau pemeriksaan belum disampaikan, Silahkan isi terlebih dahulu?",
+                "options": hitl_options,
+                "missing_subjective": not has_subjective,
+                "missing_objective": not has_objective,
+                "patient_id": patient_id_for_soap
+            }
+            steps.append({
+                "step_name": "Human in The Loop: Verifikasi Data Subjektif & Objektif",
+                "description": "Mendeteksi data anamnesis/observasi klinis belum lengkap. Menampilkan 3 pilihan input data klinis (Rekaman, Upload Berkas, atau Input Manual).",
+                "status": "info",
+                "result": {
+                    "hitl_status": "waiting_clinical_input",
+                    "missing_subjective": not has_subjective,
+                    "missing_objective": not has_objective,
+                    "options": ["Rekam Langsung", "Upload Berkas", "Input Manual (Multi-Step S/O/A/P)"]
+                }
+            })
+            log_node_end("synthesis", "Human-in-the-Loop triggered: Missing Subjective / Objective clinical findings.")
+            return {
+                **state,
+                "steps_executed": steps,
+                "final_synthesis": final_text,
+                "hitl_required": True,
+                "hitl_data": hitl_data
+            }
 
     if detected_intent is None and not is_general_knowledge_query:
         logger.debug("No patient data found")   
@@ -633,7 +729,7 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
             "1. Dokter meminta Informasi Demografi Pasien (Nama, MRN, NIK, Usia/Gender, Golongan Darah, BPJS, Poliklinik, DPJP).\n"
             "2. ATURAN ANTI-HALUSINASI MUTLAK: Sajikan HANYA data demografi yang tercantum di atas. Jangan mengarang data atau menampilkan tabel hasil lab / rawat inap jika tidak diminta.\n"
             "3. Format sajian menggunakan Markdown terstruktur dan tabel rapi:\n"
-            "   - Judul: `## 📋 Informasi Profil & Demografi Pasien (SIMRS MCP)`\n"
+            "   - Judul: `## 📋 Informasi Profil & Demografi Pasien (SIMRS / Satu Sehat)`\n"
             "   - Tabel Parameter Demografi (Nama Pasien, No. Rekam Medis (MRN), NIK, Usia / Gender, Golongan Darah, Status Jaminan (BPJS), Poliklinik Aktif, DPJP)\n"
             "   - Disclaimer singkat di akhir."
         )
@@ -662,7 +758,7 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
             "1. Dokter meminta Informasi Data Anamnesis Pasien (Keluhan Utama, Riwayat Penyakit Sekarang/RPS, Riwayat Penyakit Dahulu/RPD, Riwayat Pengobatan, Riwayat Alergi).\n"
             "2. ATURAN ANTI-HALUSINASI MUTLAK: Sajikan HANYA data anamnesis yang tercantum di atas. Jangan mengarang data dan JANGAN menampilkan data/tabel laboratorium, tanda vital, atau rekomendasi obat/terapi jika tidak diminta.\n"
             "3. Format sajian menggunakan Markdown terstruktur dan tabel rapi:\n"
-            "   - Judul: `## 📝 Data Anamnesis Pasien (SIMRS MCP)`\n"
+            "   - Judul: `## 📝 Data Anamnesis Pasien (SIMRS / Satu Sehat)`\n"
             "   - Tabel Komponen Anamnesis (Keluhan Utama, RPS, RPD, Riwayat Pengobatan, Riwayat Alergi)\n"
             "   - Disclaimer singkat di bagian akhir."
         )
@@ -846,6 +942,15 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
         if lit_summary:
             prompt_context += f"=== CLINICAL PRACTICE GUIDELINE REFERENCES ===\n{lit_summary}\n\n"
 
+        refinement_feedback = state.get("refinement_feedback")
+        iteration_count = state.get("iteration_count") or 0
+        if iteration_count > 0 and refinement_feedback:
+            prompt_context += (
+                f"=== 🔄 PANDUAN REVISI & SELF-REFLECTION (PUTARAN {iteration_count + 1}/3) ===\n"
+                f"Evaluator mendeteksi catatan berikut pada draf sebelumnya:\n{refinement_feedback}\n"
+                "Instruksi: Lakukan perbaikan dan penyempurnaan pada dosis, kepatuhan pedoman klinis (KDIGO/ADA/PERKENI), penyesuaian fungsi organ, dan edukasi monitoring.\n\n"
+            )
+
         intro_desc = (
             "Anda adalah Asisten AI Medis Klinis (Medical Co-Pilot) profesional yang berfokus pada konsultasi medis umum berbasis literatur ilmiah dan basis pengetahuan vektor Qdrant (Knowledge Management)."
             if not simrs_profile
@@ -881,13 +986,15 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
             _, structured_output = _generate_fallback_synthesis(
                 query, ehr_data, simrs_profile, simrs_history, simrs_anamnesis, simrs_labs,
                 diagnostic_rec, disease_exp, red_flags, med_rec, drug_safety,
-                simrs_update_res, drug_findings, lit_summary, rag_chunks
+                simrs_update_res, drug_findings, lit_summary, rag_chunks,
+                detected_intent=state.get("detected_intent")
             )
         except Exception as e:
             final_text, structured_output = _generate_fallback_synthesis(
                 query, ehr_data, simrs_profile, simrs_history, simrs_anamnesis, simrs_labs,
                 diagnostic_rec, disease_exp, red_flags, med_rec, drug_safety,
-                simrs_update_res, drug_findings, lit_summary, rag_chunks, error_note=str(e)
+                simrs_update_res, drug_findings, lit_summary, rag_chunks, error_note=str(e),
+                detected_intent=state.get("detected_intent")
             )
     elif api_key and HAS_GOOGLE_GENAI_SDK:
         try:
@@ -900,24 +1007,27 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
             _, structured_output = _generate_fallback_synthesis(
                 query, ehr_data, simrs_profile, simrs_history, simrs_anamnesis, simrs_labs,
                 diagnostic_rec, disease_exp, red_flags, med_rec, drug_safety,
-                simrs_update_res, drug_findings, lit_summary, rag_chunks
+                simrs_update_res, drug_findings, lit_summary, rag_chunks,
+                detected_intent=state.get("detected_intent")
             )
         except Exception as e:
             final_text, structured_output = _generate_fallback_synthesis(
                 query, ehr_data, simrs_profile, simrs_history, simrs_anamnesis, simrs_labs,
                 diagnostic_rec, disease_exp, red_flags, med_rec, drug_safety,
-                simrs_update_res, drug_findings, lit_summary, rag_chunks, error_note=str(e)
+                simrs_update_res, drug_findings, lit_summary, rag_chunks, error_note=str(e),
+                detected_intent=state.get("detected_intent")
             )
     else:
         final_text, structured_output = _generate_fallback_synthesis(
             query, ehr_data, simrs_profile, simrs_history, simrs_anamnesis, simrs_labs,
             diagnostic_rec, disease_exp, red_flags, med_rec, drug_safety,
-            simrs_update_res, drug_findings, lit_summary, rag_chunks
+            simrs_update_res, drug_findings, lit_summary, rag_chunks,
+            detected_intent=state.get("detected_intent")
         )
 
     steps.append({
-        "step_name": "Google Gemini LLM Clinical Synthesis",
-        "description": f"Synthesized evidence-based guidelines & Knowledge Management literature via Gemini ({settings.GEMINI_MODEL_NAME})",
+        "step_name": "LLM Clinical Synthesis",
+        "description": f"Synthesized evidence-based guidelines & Knowledge Management literature",
         "status": "success",
         "result": "Synthesis generated successfully"
     })

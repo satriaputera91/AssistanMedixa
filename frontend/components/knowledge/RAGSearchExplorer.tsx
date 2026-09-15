@@ -48,7 +48,7 @@ export default function RAGSearchExplorer() {
             <span>Eksplorasi Vektor &amp; Pencarian Semantik RAG</span>
           </h2>
           <p className="text-xs text-emerald-700 mt-0.5">
-            Uji pencarian dokumen medis berbasis embedding Gemini text-embedding-004 &amp; reranking Qdrant.
+            Uji pencarian dokumen medis berbasis embedding Generative AI text-embedding-004 &amp; reranking Qdrant.
           </p>
         </div>
       </div>

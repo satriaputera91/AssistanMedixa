@@ -250,8 +250,8 @@ class TestTempSOAPAudioStorage(unittest.TestCase):
 
     def test_06_cppt_intent_uses_temp_soap_data(self):
         """Test that CPPT commit and synthesis logic directly uses Temp SOAP data when available."""
-        from app.modules.medical_agent.agent.graph import node_execute_tools
-        from app.modules.medical_agent.agent.synthesis import _generate_fallback_synthesis
+        from app.modules.medical_agent.graph import node_execute_tools
+        from app.modules.medical_agent.skills.synthesis import _generate_fallback_synthesis
 
         # Create a temp soap in database
         temp_soap = self.db.create_temp_soap(
@@ -302,7 +302,7 @@ class TestTempSOAPAudioStorage(unittest.TestCase):
         from app.modules.medical_agent.skills.anamnesis import node_fetch_patient_history
         from app.modules.medical_agent.skills.diagnostics import node_diagnostic_recommendation
         from app.modules.medical_agent.skills.pharmacology import node_km_medication_recommendation
-        from app.modules.medical_agent.agent.synthesis import _generate_fallback_synthesis
+        from app.modules.medical_agent.skills.synthesis import _generate_fallback_synthesis
 
         # 1. Create a temp SOAP record
         temp_soap = self.db.create_temp_soap(

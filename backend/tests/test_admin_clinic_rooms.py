@@ -85,9 +85,47 @@ def test_admin_clinic_room_crud():
     assert del_ok is True
     assert dbApplication.get_clinic_room(room_id) is None
     # Verify doctor was unassigned
-    assert test_user_id not in dbApplication.doctor_selected_room
+def test_doctor_logout_and_login_resets_selected_room():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    
+    client = TestClient(app)
+    
+    # 1. Login doctor
+    login_res = client.post("/api/v1/auth/login", json={"email": "doctor@AssistantMedixa.com", "password": "doctor123"})
+    assert login_res.status_code == 200
+    token = login_res.json()["access_token"]
+    user_id = login_res.json()["user_id"]
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # 2. Select a clinic room
+    select_res = client.post("/api/v1/agent/clinic-rooms/select", json={"room_id": "ROOM-001"}, headers=headers)
+    assert select_res.status_code == 200
+    assert select_res.json()["selected_room"]["room_id"] == "ROOM-001"
+    assert dbApplication.doctor_selected_room.get(user_id) == "ROOM-001"
+    
+    # 3. Doctor logs out -> Room selection must be reset
+    logout_res = client.post("/api/v1/auth/logout", headers=headers)
+    assert logout_res.status_code == 200
+    assert user_id not in dbApplication.doctor_selected_room
+    
+    # 4. Check selected room returns None
+    get_res = client.get("/api/v1/agent/clinic-rooms/selected", headers=headers)
+    assert get_res.status_code == 200
+    assert get_res.json()["selected_room"] is None
+    
+    # 5. Doctor logs in again -> Fresh session requires room selection
+    login_res2 = client.post("/api/v1/auth/login", json={"email": "doctor@AssistantMedixa.com", "password": "doctor123"})
+    assert login_res2.status_code == 200
+    token2 = login_res2.json()["access_token"]
+    headers2 = {"Authorization": f"Bearer {token2}"}
+    
+    get_res2 = client.get("/api/v1/agent/clinic-rooms/selected", headers=headers2)
+    assert get_res2.status_code == 200
+    assert get_res2.json()["selected_room"] is None, "New login must require doctor to select clinic room again"
 
 
 if __name__ == "__main__":
     test_admin_clinic_room_crud()
-    print("✅ All admin clinic room tests passed successfully!")
+    test_doctor_logout_and_login_resets_selected_room()
+    print("✅ All admin clinic room and logout reset tests passed successfully!")

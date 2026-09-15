@@ -1,4 +1,4 @@
-# 📋 Version Notes - AssistanMedixa (AIMedical)
+# 📋 Version Notes - AssistanMedixa (AssistantMedixa)
 
 ---
 
@@ -12,7 +12,7 @@ Pembaruan **Versi 1.4.0** menghadirkan pembaruan alur kerja **LangGraph Vector D
 ### ✨ Fitur Baru & Peningkatan Utama
 
 #### 1. 🔍 Alur Pencarian Vector DB Wajib pada Konsultasi Medis Umum
-- **LangGraph Routing Terintegrasi**: Kueri pada mode Konsultasi Medis Umum (tanpa pemilihan pasien spesifik) sekarang **wajib melewati langkah pencarian ke Vector DB (Qdrant RAG & Evidence-Based Literature Search)** sebelum dieksekusi oleh simpul sintesis Google Gemini.
+- **LangGraph Routing Terintegrasi**: Kueri pada mode Konsultasi Medis Umum (tanpa pemilihan pasien spesifik) sekarang **wajib melewati langkah pencarian ke Vector DB (Qdrant RAG & Evidence-Based Literature Search)** sebelum dieksekusi oleh simpul sintesis Generative AI.
 - **Audit Trail & Step Logging**: Peningkatan pencatatan langkah `Retrieval Augmentation Generation (Qdrant Vector DB)` pada `steps_executed` dan penyediaan `rag_chunks` serta `literature_summary` dalam state untuk grounding LLM yang optimal.
 - **Penambahan Skenario Uji**: Penambahan pengujian skenario `test_01b_general_conversation_passes_through_vector_db_search` dan pengujian urutan eksekusi step.
 
@@ -76,7 +76,7 @@ Pembaruan **Versi 1.3.0** menghadirkan peningkatan arsitektur besar pada sistem 
 ### Versi 1.2.0 (2026-08-20)
 - Integrasi **Model Context Protocol (MCP)** untuk SIMRS Bridge.
 - Implementasi sistem validasi keluaran LLM (*LLM Output Guardrails & Safety Validator*).
-- Transkripsi konsultasi audio dokter-pasien via Google Gemini STT.
+- Transkripsi konsultasi audio dokter-pasien via Generative AI STT.
 
 ### Versi 1.1.0 (2026-08-15)
 - Alur penalaran *Multi-step reasoning* menggunakan **LangGraph**.
@@ -84,6 +84,6 @@ Pembaruan **Versi 1.3.0** menghadirkan peningkatan arsitektur besar pada sistem 
 - Streaming respons real-time (Server-Sent Events) ke antarmuka dokter.
 
 ### Versi 1.0.0 (2026-08-01)
-- Rilis inisial platform AssistanMedixa (AIMedical).
+- Rilis inisial platform AssistanMedixa (AssistantMedixa).
 - Modul autentikasi JWT dan Role-Based Access Control (RBAC).
-- Integrasi Google Gemini 2.0 Flash untuk asisten klinis dasar.
+- Integrasi Generative AI untuk asisten klinis dasar.

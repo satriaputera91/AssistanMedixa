@@ -8,7 +8,7 @@ from reportlab.platypus import (
 )
 
 def build_pdf():
-    samples_dir = Path("/Users/rnd/Program/Personal/AIMedical/samples")
+    samples_dir = Path("/Users/rnd/Program/Personal/AssistantMedixa/samples")
     samples_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = samples_dir / "Panduan_Klinis_Infeksi_Ginjal_Pielonefritis.pdf"
 

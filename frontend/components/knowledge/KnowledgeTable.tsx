@@ -28,7 +28,7 @@ export default function KnowledgeTable({ items, onDelete }: KnowledgeTableProps)
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedSpecialty, setSelectedSpecialty] = useState('all');
-  
+
   // Pagination States
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
@@ -97,13 +97,13 @@ export default function KnowledgeTable({ items, onDelete }: KnowledgeTableProps)
     } else {
       pages.push(1);
       if (safePage > 3) pages.push('...');
-      
+
       const start = Math.max(2, safePage - 1);
       const end = Math.min(totalPages - 1, safePage + 1);
       for (let i = start; i <= end; i++) {
         pages.push(i);
       }
-      
+
       if (safePage < totalPages - 2) pages.push('...');
       pages.push(totalPages);
     }
@@ -175,7 +175,7 @@ export default function KnowledgeTable({ items, onDelete }: KnowledgeTableProps)
               {/* Keywords */}
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
-                  Kata Kunci Ekstraksi Gemini AI
+                  Kata Kunci Ekstraksi Generative AI AI
                 </label>
                 {viewingItem.keywords && viewingItem.keywords.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
@@ -523,11 +523,10 @@ export default function KnowledgeTable({ items, onDelete }: KnowledgeTableProps)
                     key={page}
                     type="button"
                     onClick={() => setCurrentPage(page)}
-                    className={`w-8 h-8 rounded-xl text-xs font-bold transition-all ${
-                      isActive
+                    className={`w-8 h-8 rounded-xl text-xs font-bold transition-all ${isActive
                         ? 'bg-emerald-600 text-white shadow-sm'
                         : 'text-emerald-800 dark:text-slate-300 hover:bg-emerald-100 dark:hover:bg-slate-800'
-                    }`}
+                      }`}
                   >
                     {page}
                   </button>

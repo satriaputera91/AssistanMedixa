@@ -7,6 +7,8 @@ import Navbar from '@/components/common/Navbar';
 import Sidebar from '@/components/chat/Sidebar';
 import ChatWindow from '@/components/chat/ChatWindow';
 import ClinicRoomPickerModal from '@/components/chat/ClinicRoomPickerModal';
+import AppLoadingOverlay from '@/components/common/AppLoadingOverlay';
+import ConnectionStatusBanner from '@/components/common/ConnectionStatusBanner';
 
 export default function DoctorPage() {
   const { userName, userRole, loading, logout } = useAuth(['doctor', 'admin']);
@@ -19,6 +21,9 @@ export default function DoctorPage() {
     activeSessionId,
     messages,
     executing,
+    activeNode,
+    completedNodes,
+    latestSummary,
     loadPatients,
     loadSessions,
     loadSessionMessages,
@@ -38,6 +43,7 @@ export default function DoctorPage() {
   const [selectedRoom, setSelectedRoom] = useState<ClinicRoom | null>(null);
   const [roomPickerOpen, setRoomPickerOpen] = useState(false);
   const [roomLoaded, setRoomLoaded] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   const loadClinicRooms = useCallback(async () => {
     try {
@@ -72,6 +78,15 @@ export default function DoctorPage() {
     }
   };
 
+  const handleRetryInit = async () => {
+    setIsRetrying(true);
+    try {
+      await Promise.all([loadSessions(), loadClinicRooms()]);
+    } finally {
+      setIsRetrying(false);
+    }
+  };
+
   useEffect(() => {
     if (!loading) {
       loadSessions();
@@ -79,19 +94,20 @@ export default function DoctorPage() {
     }
   }, [loading, loadSessions, loadClinicRooms]);
 
-  if (loading) {
+  if (loading || (!roomLoaded && clinicRooms.length === 0)) {
     return (
-      <div className="flex items-center justify-center h-screen bg-emerald-50 text-emerald-700">
-        <div className="text-center">
-          <div className="text-3xl mb-3 animate-pulse">🩺</div>
-          <p className="text-sm">Memuat ruang kerja dokter…</p>
-        </div>
-      </div>
+      <AppLoadingOverlay
+        message="Mempersiapkan Ruang Kerja Medis & Layanan AI..."
+        subMessage="Menghubungkan ke layanan poliklinik & rekam medis..."
+        onRetry={handleRetryInit}
+        isRetrying={isRetrying}
+      />
     );
   }
 
   return (
-    <div className="flex flex-col h-screen bg-emerald-50 dark:bg-slate-950 text-emerald-950 dark:text-slate-100 overflow-hidden transition-colors">
+    <div className="flex flex-col h-screen bg-emerald-50 dark:bg-slate-950 text-emerald-950 dark:text-slate-100 overflow-hidden transition-colors relative">
+      <ConnectionStatusBanner />
       <Navbar userName={userName} userRole={userRole} onLogout={logout} activePage="doctor" />
 
       {/* Clinic Room Picker Modal (shown on first login or when user changes room) */}
@@ -134,6 +150,10 @@ export default function DoctorPage() {
             patients={patients}
             selectedPatient={selectedPatient}
             onSelectPatient={setSelectedPatient}
+            sessionId={activeSessionId}
+            activeNode={activeNode}
+            completedNodes={completedNodes}
+            latestSummary={latestSummary}
           />
         </main>
       </div>

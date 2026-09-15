@@ -76,7 +76,7 @@ export default function ClinicRoomModal({
       if (room) {
         setRoomName(room.room_name || '');
         setRoomCode(room.room_code || '');
-        
+
         // Specialty matching
         const foundSpecialty = COMMON_SPECIALTIES.find((s) => s.value === room.specialty);
         if (foundSpecialty && foundSpecialty.value !== 'other') {
@@ -189,7 +189,7 @@ export default function ClinicRoomModal({
               <p className="text-xs text-emerald-700 dark:text-slate-400 mt-0.5">
                 {isEditing
                   ? 'Perbarui informasi lokasi, spesialisasi, atau jam layanan.'
-                  : 'Daftarkan ruangan poliklinik baru ke sistem SIMRS & AIMedical.'}
+                  : 'Daftarkan ruangan poliklinik baru ke sistem SIMRS & AssistantMedixa.'}
               </p>
             </div>
           </div>

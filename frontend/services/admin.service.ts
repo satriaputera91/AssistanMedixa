@@ -168,4 +168,142 @@ export class AdminService {
   public static async toggleClinicRoomStatus(roomId: string): Promise<ClinicRoomAdmin> {
     return ApiClient.post<ClinicRoomAdmin>(`/admin/clinic-rooms/${roomId}/toggle-status`, {});
   }
+
+  // ── MCP Dynamic Configuration & Tools Methods ──────────────────────
+
+  public static async getMCPConfig(): Promise<MCPConfig> {
+    return ApiClient.get<MCPConfig>('/admin/mcp/config');
+  }
+
+  public static async updateMCPConfig(input: UpdateMCPConfigInput): Promise<MCPConfig> {
+    return ApiClient.put<MCPConfig>('/admin/mcp/config', input);
+  }
+
+  public static async testMCPConnection(): Promise<MCPTestConnectionResponse> {
+    return ApiClient.post<MCPTestConnectionResponse>('/admin/mcp/test-connection', {});
+  }
+
+  public static async getMCPTools(): Promise<MCPTool[]> {
+    return ApiClient.get<MCPTool[]>('/admin/mcp/tools');
+  }
+
+  public static async getMCPTool(toolName: string): Promise<MCPTool> {
+    return ApiClient.get<MCPTool>(`/admin/mcp/tools/${encodeURIComponent(toolName)}`);
+  }
+
+  public static async createMCPTool(input: CreateCustomMCPToolInput): Promise<MCPTool> {
+    return ApiClient.post<MCPTool>('/admin/mcp/tools', input);
+  }
+
+  public static async updateMCPTool(toolName: string, input: UpdateMCPToolInput): Promise<MCPTool> {
+    return ApiClient.put<MCPTool>(`/admin/mcp/tools/${encodeURIComponent(toolName)}`, input);
+  }
+
+  public static async toggleMCPToolStatus(toolName: string): Promise<MCPTool> {
+    return ApiClient.post<MCPTool>(`/admin/mcp/tools/${encodeURIComponent(toolName)}/toggle`, {});
+  }
+
+  public static async deleteMCPTool(toolName: string): Promise<{ status: string; message: string; tool_name: string }> {
+    return ApiClient.delete<{ status: string; message: string; tool_name: string }>(`/admin/mcp/tools/${encodeURIComponent(toolName)}`);
+  }
+
+  public static async testRunMCPTool(input: MCPTestRunToolInput): Promise<MCPTestRunToolResponse> {
+    return ApiClient.post<MCPTestRunToolResponse>('/admin/mcp/tools/test-run', input);
+  }
+}
+
+// ── MCP Interfaces ───────────────────────────────────────────────────
+
+export interface MCPConfig {
+  server_name: string;
+  protocol_version: string;
+  mode: 'mock' | 'live' | 'hybrid' | string;
+  endpoint_url: string;
+  auth_type: 'bearer' | 'api_key' | 'none' | string;
+  auth_token?: string;
+  timeout_seconds: number;
+  retry_attempts: number;
+  enable_audit_logging: boolean;
+  auto_sync_enabled: boolean;
+  custom_headers?: Record<string, any>;
+  status: string;
+  latency_ms?: number;
+  last_health_check?: string;
+  updated_at?: string;
+}
+
+export interface UpdateMCPConfigInput {
+  server_name?: string;
+  protocol_version?: string;
+  mode?: string;
+  endpoint_url?: string;
+  auth_type?: string;
+  auth_token?: string;
+  timeout_seconds?: number;
+  retry_attempts?: number;
+  enable_audit_logging?: boolean;
+  auto_sync_enabled?: boolean;
+  custom_headers?: Record<string, any>;
+}
+
+export interface MCPTool {
+  name: string;
+  display_name: string;
+  description: string;
+  category: string;
+  is_enabled: boolean;
+  is_builtin: boolean;
+  input_schema: Record<string, any>;
+  custom_endpoint?: string;
+  mock_response?: Record<string, any>;
+  execution_count: number;
+  last_executed_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CreateCustomMCPToolInput {
+  name: string;
+  display_name: string;
+  description: string;
+  category?: string;
+  is_enabled?: boolean;
+  input_schema?: Record<string, any>;
+  custom_endpoint?: string;
+  mock_response?: Record<string, any>;
+}
+
+export interface UpdateMCPToolInput {
+  display_name?: string;
+  description?: string;
+  category?: string;
+  is_enabled?: boolean;
+  input_schema?: Record<string, any>;
+  custom_endpoint?: string;
+  mock_response?: Record<string, any>;
+}
+
+export interface MCPTestConnectionResponse {
+  status: 'success' | 'warning' | 'error' | string;
+  message: string;
+  server_name: string;
+  mode: string;
+  endpoint_url: string;
+  latency_ms: number;
+  active_tools_count: number;
+  checked_at: string;
+}
+
+export interface MCPTestRunToolInput {
+  tool_name: string;
+  arguments?: Record<string, any>;
+}
+
+export interface MCPTestRunToolResponse {
+  tool_name: string;
+  status: string;
+  execution_mode: string;
+  latency_ms: number;
+  result: Record<string, any>;
+  timestamp: string;
 }

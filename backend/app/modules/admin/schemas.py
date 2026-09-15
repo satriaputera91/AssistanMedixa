@@ -111,3 +111,99 @@ class UpdateClinicRoomRequest(BaseModel):
     description: Optional[str] = None
     operational_hours: Optional[str] = None
 
+
+# ── MCP Dynamic Configuration & Tool Schemas ───────────────────────
+
+class MCPConfigSchema(BaseModel):
+    server_name: str
+    protocol_version: str
+    mode: str # "mock" | "live" | "hybrid"
+    endpoint_url: str
+    auth_type: str # "bearer" | "api_key" | "none"
+    auth_token: Optional[str] = ""
+    timeout_seconds: int = 10
+    retry_attempts: int = 3
+    enable_audit_logging: bool = True
+    auto_sync_enabled: bool = True
+    custom_headers: Optional[dict] = {}
+    status: str = "connected"
+    latency_ms: Optional[int] = 12
+    last_health_check: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class UpdateMCPConfigRequest(BaseModel):
+    server_name: Optional[str] = None
+    protocol_version: Optional[str] = None
+    mode: Optional[str] = None
+    endpoint_url: Optional[str] = None
+    auth_type: Optional[str] = None
+    auth_token: Optional[str] = None
+    timeout_seconds: Optional[int] = None
+    retry_attempts: Optional[int] = None
+    enable_audit_logging: Optional[bool] = None
+    auto_sync_enabled: Optional[bool] = None
+    custom_headers: Optional[dict] = None
+
+
+class MCPToolAdminView(BaseModel):
+    name: str
+    display_name: str
+    description: str
+    category: str
+    is_enabled: bool
+    is_builtin: bool
+    input_schema: dict
+    custom_endpoint: Optional[str] = None
+    mock_response: Optional[dict] = None
+    execution_count: int = 0
+    last_executed_at: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class CreateCustomMCPToolRequest(BaseModel):
+    name: str
+    display_name: str
+    description: str
+    category: Optional[str] = "custom"
+    is_enabled: Optional[bool] = True
+    input_schema: Optional[dict] = None
+    custom_endpoint: Optional[str] = None
+    mock_response: Optional[dict] = None
+
+
+class UpdateMCPToolRequest(BaseModel):
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    is_enabled: Optional[bool] = None
+    input_schema: Optional[dict] = None
+    custom_endpoint: Optional[str] = None
+    mock_response: Optional[dict] = None
+
+
+class MCPTestConnectionResponse(BaseModel):
+    status: str # "success" | "warning" | "error"
+    message: str
+    server_name: str
+    mode: str
+    endpoint_url: str
+    latency_ms: int
+    active_tools_count: int
+    checked_at: str
+
+
+class MCPTestRunToolRequest(BaseModel):
+    tool_name: str
+    arguments: dict = {}
+
+
+class MCPTestRunToolResponse(BaseModel):
+    tool_name: str
+    status: str
+    execution_mode: str
+    latency_ms: int
+    result: dict
+    timestamp: str
+

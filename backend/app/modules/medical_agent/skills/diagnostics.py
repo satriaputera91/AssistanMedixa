@@ -3,10 +3,10 @@ from typing import Dict, Any, Optional
 from app.modules.medical_agent.context.state import MedicalAgentState
 from app.modules.medical_agent.tools.simrs_tools import tool_simrs_get_patient_labs
 from app.modules.medical_agent.tools.clinical_tools import tool_generate_diagnostic_recommendations
-from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
+from app.modules.medical_agent.logging_utils import log_node_start, log_node_end
 
 def node_eval_simrs_labs(state: MedicalAgentState) -> MedicalAgentState:
-    """Evaluates serial laboratory panels, eGFR, uACR, and vital signs from SIMRS MCP."""
+    """Evaluates serial laboratory panels, eGFR, uACR, and vital signs from SIMRS / Satu Sehat."""
     log_node_start("eval_simrs_labs", state, icon="🧪")
     patient_id = state.get("patient_id")
     steps = list(state.get("steps_executed", []))

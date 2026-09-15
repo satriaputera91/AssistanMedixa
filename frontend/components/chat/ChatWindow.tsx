@@ -6,6 +6,9 @@ import SOAEditor from './SOAEditor';
 import MarkdownContent from './MarkdownContent';
 import AudioRecorderModal from './AudioRecorderModal';
 import AgentStatusIndicator from './AgentStatusIndicator';
+import RealtimeWorkflowStatusBar from './RealtimeWorkflowStatusBar';
+import HITLOptionsCard from './HITLOptionsCard';
+import ManualSOAPModal from './ManualSOAPModal';
 import BotAvatar from '@/components/common/BotAvatar';
 import WorkflowExpandable from './WorkflowExpandable';
 import NewConsultationSelection from './NewConsultationSelection';
@@ -26,9 +29,13 @@ interface ChatWindowProps {
   patients?: PatientRecord[];
   selectedPatient?: string;
   onSelectPatient?: (patientId: string) => void;
+  sessionId?: string | null;
+  activeNode?: string | null;
+  completedNodes?: string[];
+  latestSummary?: string;
 }
 
-// FAQ for Active Patient Consultation (SIMRS MCP & EHR Data)
+// FAQ for Active Patient Consultation (SIMRS / Satu Sehat & EHR Data)
 const PATIENT_FAQS = [
   { icon: '📋', label: '1. Ambil Informasi Demografi Pasien', text: 'Ambil data profil demografi pasien dari modul RME SIMRS.' },
   { icon: '📝', label: '2. Ambil Anamnesis Sebelumnya', text: 'Tarik data anamnesis dari modul RME SIMRS.' },
@@ -68,6 +75,10 @@ export default function ChatWindow({
   patients = [],
   selectedPatient = '',
   onSelectPatient,
+  sessionId,
+  activeNode = null,
+  completedNodes = [],
+  latestSummary = '',
 }: ChatWindowProps) {
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -82,6 +93,7 @@ export default function ChatWindow({
   const [cpptModalOpen, setCpptModalOpen] = useState(false);
   const [cpptInitialContent, setCpptInitialContent] = useState<Partial<CPPTContent> | undefined>(undefined);
   const [committingTempId, setCommittingTempId] = useState<string | null>(null);
+  const [manualSoapModalOpen, setManualSoapModalOpen] = useState(false);
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -223,6 +235,15 @@ export default function ChatWindow({
           />
         ) : (
           <>
+            {/* Realtime Workflow Status Bar & Pipeline Tracker */}
+            <RealtimeWorkflowStatusBar
+              executing={executing}
+              sessionId={sessionId}
+              activeNode={activeNode}
+              completedNodes={completedNodes}
+              latestSummary={latestSummary}
+            />
+
             {isChatActive && messages.length === 0 && !executing && (
               <div className="text-center py-10 text-emerald-700 dark:text-emerald-400 space-y-3 animate-in fade-in duration-200">
                 <div className="flex justify-center">
@@ -455,9 +476,9 @@ export default function ChatWindow({
                         )} */}
 
                         {/* Temporary SOAP & Audio Recording Card */}
-                        {m.metadata?.temp_soap && (
+                        {/* {m.metadata?.temp_soap && (
                           <div className="mt-4 rounded-xl border border-emerald-300/90 dark:border-emerald-700/70 bg-gradient-to-br from-emerald-50/90 via-teal-50/40 to-white dark:from-slate-900 dark:via-slate-850 dark:to-slate-900 p-4 shadow-sm space-y-3.5 animate-in fade-in duration-200">
-                            {/* Header & Status */}
+                          
                             <div className="flex items-center justify-between flex-wrap gap-2 pb-2.5 border-b border-emerald-200/70 dark:border-slate-800">
                               <div className="flex items-center gap-2">
                                 <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-600 text-white text-sm shadow-2xs">
@@ -493,7 +514,6 @@ export default function ChatWindow({
                               </div>
                             </div>
 
-                            {/* Audio Consultation Player */}
                             {m.metadata.temp_soap.audio_url && (
                               <div className="rounded-lg bg-white dark:bg-slate-800/90 border border-emerald-200 dark:border-slate-700 p-3 flex flex-col gap-2 shadow-2xs">
                                 <div className="flex items-center justify-between text-xs">
@@ -518,7 +538,6 @@ export default function ChatWindow({
                               </div>
                             )}
 
-                            {/* Action Buttons: Review & Send to SIMRS */}
                             <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
                               <button
                                 type="button"
@@ -573,7 +592,18 @@ export default function ChatWindow({
                               )}
                             </div>
                           </div>
-                        )}
+                        )} */}
+
+                        {/* Human in The Loop Action Card when subjective/objective data is missing */}
+                        {(m.metadata?.hitl_required ||
+                          m.metadata?.hitl_data ||
+                          m.content.includes('Mohon maaf hasil anamnesis atau pemeriksaan belum disampaikan')) && (
+                            <HITLOptionsCard
+                              onStartRecord={() => setRecorderOpen(true)}
+                              onUploadFile={() => audioInputRef.current?.click()}
+                              onOpenManualModal={() => setManualSoapModalOpen(true)}
+                            />
+                          )}
 
                         <WorkflowExpandable steps={m.metadata?.steps} />
                       </>
@@ -585,7 +615,12 @@ export default function ChatWindow({
 
             {executing && (
               <div className="flex justify-start">
-                <AgentStatusIndicator executing={executing} />
+                <AgentStatusIndicator
+                  executing={executing}
+                  sessionId={sessionId}
+                  activeNode={activeNode}
+                  latestSummary={latestSummary}
+                />
               </div>
             )}
           </>
@@ -796,6 +831,23 @@ export default function ChatWindow({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Manual Multi-Step SOAP Input Modal */}
+      {manualSoapModalOpen && (
+        <ManualSOAPModal
+          sessionId={sessionId || 'default-session'}
+          patientId={selectedPatient}
+          patientName={currentPatient?.name}
+          onClose={() => setManualSoapModalOpen(false)}
+          onSaved={(soapRecord) => {
+            setManualSoapModalOpen(false);
+            // Automatically prompt the medical AI with the freshly saved clinical SOAP findings
+            onSend(
+              'Data Anamnesis dan Pemeriksaan Fisik telah dilengkapi secara manual. Mohon berikan rekomendasi diagnosis, terapi obat, dan rencana tindakan medis berdasarkan data SOAP terbaru ini.'
+            );
+          }}
+        />
       )}
     </div>
   );

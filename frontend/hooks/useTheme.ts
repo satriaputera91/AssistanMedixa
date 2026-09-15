@@ -10,7 +10,7 @@ export function useTheme() {
 
   useEffect(() => {
     setMounted(true);
-    const savedTheme = localStorage.getItem('aimedical_theme') as ThemeMode | null;
+    const savedTheme = localStorage.getItem('AssistantMedixa_theme') as ThemeMode | null;
     if (savedTheme === 'dark' || savedTheme === 'light') {
       setTheme(savedTheme);
       applyTheme(savedTheme);
@@ -35,7 +35,7 @@ export function useTheme() {
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
       const next: ThemeMode = prev === 'light' ? 'dark' : 'light';
-      localStorage.setItem('aimedical_theme', next);
+      localStorage.setItem('AssistantMedixa_theme', next);
       applyTheme(next);
       return next;
     });
@@ -43,7 +43,7 @@ export function useTheme() {
 
   const setThemeMode = useCallback((mode: ThemeMode) => {
     setTheme(mode);
-    localStorage.setItem('aimedical_theme', mode);
+    localStorage.setItem('AssistantMedixa_theme', mode);
     applyTheme(mode);
   }, []);
 

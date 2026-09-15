@@ -78,7 +78,7 @@ export default function FileUploader({ onUpload, uploading }: FileUploaderProps)
             <span>Unggah Dokumen Medis</span>
           </h2>
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-            ✨ AI Gemini Auto-Keywords
+            ✨ AI Generative AI Auto-Keywords
           </span>
         </div>
         <p className="text-xs text-emerald-700 dark:text-slate-400 mb-4">
@@ -87,11 +87,10 @@ export default function FileUploader({ onUpload, uploading }: FileUploaderProps)
 
         {feedback && (
           <div
-            className={`mb-4 p-3 rounded-2xl border text-xs flex items-center justify-between ${
-              feedback.type === 'success'
+            className={`mb-4 p-3 rounded-2xl border text-xs flex items-center justify-between ${feedback.type === 'success'
                 ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-300'
                 : 'bg-red-50 dark:bg-red-950/40 border-red-300 dark:border-red-800 text-red-700 dark:text-red-300'
-            }`}
+              }`}
           >
             <div className="flex items-center gap-2">
               <span>{feedback.type === 'success' ? '✅' : '⚠️'}</span>
@@ -113,13 +112,12 @@ export default function FileUploader({ onUpload, uploading }: FileUploaderProps)
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
             onDrop={handleDrop}
-            className={`relative border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer ${
-              dragOver
+            className={`relative border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer ${dragOver
                 ? 'border-emerald-500 bg-emerald-500/10 dark:bg-emerald-950/30'
                 : selectedFileName
-                ? 'border-emerald-500 bg-emerald-50/50 dark:bg-slate-800/60'
-                : 'border-emerald-300 dark:border-slate-700 hover:border-emerald-500 hover:bg-emerald-50/30 dark:hover:bg-slate-800/40'
-            }`}
+                  ? 'border-emerald-500 bg-emerald-50/50 dark:bg-slate-800/60'
+                  : 'border-emerald-300 dark:border-slate-700 hover:border-emerald-500 hover:bg-emerald-50/30 dark:hover:bg-slate-800/40'
+              }`}
             onClick={() => fileRef.current?.click()}
           >
             <div className="text-3xl mb-2">
@@ -157,7 +155,7 @@ export default function FileUploader({ onUpload, uploading }: FileUploaderProps)
           <div className="p-2.5 bg-emerald-50/60 dark:bg-slate-800/60 rounded-xl border border-emerald-200/60 dark:border-slate-700 text-[11px] text-emerald-800 dark:text-slate-300 flex items-center gap-2">
             <span className="text-sm">🤖</span>
             <span>
-              <strong>Gemini AI Integration:</strong> Teks diekstrak otomatis dan kata kunci klinis dianalisis langsung menggunakan model LLM Gemini.
+              <strong>Generative AI AI Integration:</strong> Teks diekstrak otomatis dan kata kunci klinis dianalisis langsung menggunakan model LLM Generative AI.
             </span>
           </div>
 
@@ -200,7 +198,7 @@ export default function FileUploader({ onUpload, uploading }: FileUploaderProps)
             {uploading ? (
               <>
                 <span className="animate-spin">⏳</span>
-                <span>Mengekstrak teks & menganalisis kata kunci Gemini…</span>
+                <span>Mengekstrak teks & menganalisis kata kunci Generative AI…</span>
               </>
             ) : (
               <>

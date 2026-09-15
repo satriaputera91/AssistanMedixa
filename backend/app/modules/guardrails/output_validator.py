@@ -6,7 +6,7 @@ from datetime import datetime
 from app.modules.guardrails.service import GuardrailsService
 from app.core.database import db
 
-logger = logging.getLogger("AIMedical.LLMOutputValidator")
+logger = logging.getLogger("AssistantMedixa.LLMOutputValidator")
 
 # Allergy drug family cross-reference mapping for contraindication screening
 ALLERGY_CROSS_MAP: Dict[str, List[str]] = {

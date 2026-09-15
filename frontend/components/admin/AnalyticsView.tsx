@@ -20,7 +20,7 @@ export default function AnalyticsView({ analytics }: AnalyticsViewProps) {
             <span>Analisis Penggunaan &amp; Pemakaian Token</span>
           </h2>
           <p className="text-xs text-emerald-700 mt-0.5">
-            Aktivitas harian, beban token Gemini, dan statistik evaluasi klinis.
+            Aktivitas harian, beban token Generative AI, dan statistik evaluasi klinis.
           </p>
         </div>
       </div>

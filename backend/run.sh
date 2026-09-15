@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start script for AIMedical Backend (FastAPI + LangGraph + Gemini API)
+# Start script for AssistantMedixa Backend (FastAPI + LangGraph )
 
 cd "$(dirname "$0")/.."
 source .venv/bin/activate
@@ -7,7 +7,7 @@ source .venv/bin/activate
 export PYTHONPATH=$(pwd)/backend
 
 echo "=========================================================="
-echo "🩺 Starting AIMedical Modular Monolith Application Server"
+echo "🩺 Starting AssistantMedixa Modular Monolith Application Server"
 echo "URL: http://localhost:8000"
 echo "API Documentation: http://localhost:8000/docs"
 echo "=========================================================="

@@ -13,7 +13,7 @@ class SIMRSEMRRepository:
         self.doctor_profiles: Dict[str, Dict[str, Any]] = {
             "u1": {
                 "id": "u1",
-                "email": "doctor@aimedical.com",
+                "email": "doctor@AssistantMedixa.com",
                 "name": "Dr. Sarah Jenkins, MD",
                 "hashed_password": get_password_hash("doctor123"),
                 "role": "doctor",
@@ -24,7 +24,7 @@ class SIMRSEMRRepository:
             },
             "u2": {
                 "id": "u2",
-                "email": "admin@aimedical.com",
+                "email": "admin@AssistantMedixa.com",
                 "name": "System Administrator",
                 "hashed_password": get_password_hash("admin123"),
                 "role": "admin",
@@ -35,7 +35,7 @@ class SIMRSEMRRepository:
             },
             "u3": {
                 "id": "u3",
-                "email": "dr.chen@aimedical.com",
+                "email": "dr.chen@AssistantMedixa.com",
                 "name": "Dr. Marcus Chen, MD",
                 "hashed_password": get_password_hash("doctor123"),
                 "role": "doctor",
@@ -777,7 +777,22 @@ class SIMRSMCPServer:
     SERVER_VERSION = "1.0.0"
 
     def list_tools(self) -> List[Dict[str, Any]]:
-        """Returns MCP registered tool declarations."""
+        """Returns MCP registered tool declarations from dynamic configuration."""
+        try:
+            from app.core.database import dbApplication
+            dynamic_tools = dbApplication.get_all_mcp_tools(active_only=True)
+            if dynamic_tools:
+                return [
+                    {
+                        "name": t["name"],
+                        "description": t.get("description", ""),
+                        "inputSchema": t.get("input_schema") or {"type": "object", "properties": {}},
+                    }
+                    for t in dynamic_tools
+                ]
+        except Exception:
+            pass
+
         return [
             {
                 "name": "simrs.get_patient_profile",
@@ -858,7 +873,33 @@ class SIMRSMCPServer:
         return None
 
     def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """Executes MCP tool call."""
+        """Executes MCP tool call with dynamic status checking and execution metrics."""
+        tool_meta = None
+        try:
+            from app.core.database import dbApplication
+            tool_meta = dbApplication.get_mcp_tool(tool_name)
+            if tool_meta is not None and not tool_meta.get("is_enabled", True):
+                return {
+                    "status": "error",
+                    "message": f"Tool MCP '{tool_name}' sedang dinonaktifkan oleh Administrator.",
+                    "tool_name": tool_name,
+                    "is_enabled": False
+                }
+            dbApplication.record_mcp_tool_execution(tool_name)
+        except Exception:
+            pass
+
+        # Handle custom non-builtin tools
+        if tool_meta and not tool_meta.get("is_builtin", False):
+            mock = tool_meta.get("mock_response")
+            if mock:
+                return {"status": "success", "tool_name": tool_name, "result": mock}
+            return {
+                "status": "success",
+                "tool_name": tool_name,
+                "message": f"Custom MCP Tool '{tool_name}' berhasil dieksekusi.",
+                "arguments": arguments
+            }
         if tool_name == "simrs.get_patient_profile":
             mrn = arguments.get("mrn", "")
             profile = self._find_profile(mrn)

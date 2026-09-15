@@ -12,8 +12,11 @@ import AnalyticsView from '@/components/admin/AnalyticsView';
 import CreateUserModal from '@/components/admin/CreateUserModal';
 import GuardrailsPanel from '@/components/admin/GuardrailsPanel';
 import ClinicRoomManagement from '@/components/admin/ClinicRoomManagement';
+import MCPConfigManagement from '@/components/admin/MCPConfigManagement';
+import AppLoadingOverlay from '@/components/common/AppLoadingOverlay';
+import ConnectionStatusBanner from '@/components/common/ConnectionStatusBanner';
 
-type AdminMenuKey = 'overview' | 'users' | 'clinic_rooms' | 'guardrails' | 'monitoring' | 'analytics' | 'audit';
+type AdminMenuKey = 'overview' | 'users' | 'clinic_rooms' | 'mcp' | 'guardrails' | 'monitoring' | 'analytics' | 'audit';
 
 export default function AdminPage() {
   const { userName, userRole, loading, logout } = useAuth('admin');
@@ -24,9 +27,15 @@ export default function AdminPage() {
     analytics,
     monitoring,
     clinicRooms,
+    mcpConfig,
+    mcpTools,
     error,
     creatingUser,
     savingClinicRoom,
+    savingMcpConfig,
+    savingMcpTool,
+    testingConnection,
+    testingTool,
     loadAdminData,
     toggleUserStatus,
     createUser,
@@ -34,10 +43,27 @@ export default function AdminPage() {
     updateClinicRoom,
     deleteClinicRoom,
     toggleClinicRoomStatus,
+    updateMCPConfig,
+    testMCPConnection,
+    createMCPTool,
+    updateMCPTool,
+    toggleMCPToolStatus,
+    deleteMCPTool,
+    testRunMCPTool,
   } = useAdmin();
 
   const [activeMenu, setActiveMenu] = useState<AdminMenuKey>('overview');
   const [createUserOpen, setCreateUserOpen] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
+
+  const handleRetry = async () => {
+    setIsRetrying(true);
+    try {
+      await loadAdminData();
+    } finally {
+      setIsRetrying(false);
+    }
+  };
 
   useEffect(() => {
     if (!loading) loadAdminData();
@@ -45,12 +71,12 @@ export default function AdminPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-emerald-50 text-emerald-700">
-        <div className="text-center">
-          <div className="text-3xl mb-3 animate-pulse">⚙️</div>
-          <p className="text-sm">Memuat dasbor admin…</p>
-        </div>
-      </div>
+      <AppLoadingOverlay
+        message="Mempersiapkan Dasbor Administrator Medis..."
+        subMessage="Memuat metrik sistem, MCP tools, & konfigurasi guardrails..."
+        onRetry={handleRetry}
+        isRetrying={isRetrying}
+      />
     );
   }
 
@@ -58,15 +84,17 @@ export default function AdminPage() {
     { key: 'overview' as AdminMenuKey, label: 'Ikhtisar & Metrik', icon: '📊', desc: 'Ringkasan sistem & LLM' },
     { key: 'users' as AdminMenuKey, label: 'Manajemen Pengguna', icon: '👥', desc: `${users.length} akun dokter` },
     { key: 'clinic_rooms' as AdminMenuKey, label: 'Manajemen Ruang Poli', icon: '🏥', desc: `${clinicRooms.length} ruangan poli` },
+    { key: 'mcp' as AdminMenuKey, label: 'Konfigurasi MCP Server', icon: '🔌', desc: `${mcpTools.length} tool MCP terdaftar` },
     { key: 'guardrails' as AdminMenuKey, label: 'AI Safety & Guardrails', icon: '🛡️', desc: 'Kebijakan & sensor PII' },
-    { key: 'monitoring' as AdminMenuKey, label: 'Monitoring Sistem', icon: '🖥️', desc: 'SIMRS, Gemini, Qdrant' },
+    { key: 'monitoring' as AdminMenuKey, label: 'Monitoring Sistem', icon: '🖥️', desc: 'SIMRS, Generative AI, Qdrant' },
     { key: 'analytics' as AdminMenuKey, label: 'Analitik & Token', icon: '📈', desc: 'Metrik penggunaan & latensi' },
     { key: 'audit' as AdminMenuKey, label: 'Audit Trail & Log', icon: '📋', desc: 'Rekam jejak aktivitas' },
   ];
 
 
   return (
-    <div className="flex flex-col h-screen bg-emerald-50 dark:bg-slate-950 text-emerald-950 dark:text-slate-100 overflow-hidden transition-colors">
+    <div className="flex flex-col h-screen bg-emerald-50 dark:bg-slate-950 text-emerald-950 dark:text-slate-100 overflow-hidden transition-colors relative">
+      <ConnectionStatusBanner />
       <Navbar userName={userName} userRole={userRole} onLogout={logout} activePage="admin" />
 
       {/* Modal Tambah Pengguna */}
@@ -97,7 +125,7 @@ export default function AdminPage() {
               onClick={() => setCreateUserOpen(true)}
               className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-sm transition-all active:scale-[0.98]"
             >
-              <span>👤+</span>
+              <span>👤</span>
               <span>+ Tambah Akun Dokter</span>
             </button>
           </div>
@@ -115,11 +143,10 @@ export default function AdminPage() {
                   key={item.key}
                   type="button"
                   onClick={() => setActiveMenu(item.key)}
-                  className={`w-full text-left px-3 py-2.5 rounded-xl text-xs transition-all flex items-center gap-3 ${
-                    isActive
-                      ? 'bg-emerald-600/15 dark:bg-emerald-500/20 text-emerald-900 dark:text-emerald-300 border border-emerald-500/30 font-bold shadow-2xs'
-                      : 'text-emerald-800 dark:text-slate-300 hover:bg-emerald-100/70 dark:hover:bg-slate-800'
-                  }`}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl text-xs transition-all flex items-center gap-3 ${isActive
+                    ? 'bg-emerald-600/15 dark:bg-emerald-500/20 text-emerald-900 dark:text-emerald-300 border border-emerald-500/30 font-bold shadow-2xs'
+                    : 'text-emerald-800 dark:text-slate-300 hover:bg-emerald-100/70 dark:hover:bg-slate-800'
+                    }`}
                 >
                   <span className="text-base shrink-0">{item.icon}</span>
                   <div className="flex-1 min-w-0">
@@ -179,12 +206,10 @@ export default function AdminPage() {
           {activeMenu === 'overview' && (
             <div className="space-y-8">
               {stats && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 md:gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
                   <MetricCard label="Dokter Terdaftar" value={stats.total_doctors} color="emerald" icon="🩺" />
                   <MetricCard label="Ruang Poli" value={stats.total_clinic_rooms ?? clinicRooms.length} color="emerald" icon="🏥" />
                   <MetricCard label="Total Pertanyaan AI" value={stats.total_queries_run} color="emerald" icon="✨" />
-                  <MetricCard label="Token Gemini" value={stats.total_gemini_tokens} color="emerald" icon="⚡" />
-                  <MetricCard label="LLM Aktif" value={stats.gemini_model_active} color="emerald" icon="🧠" />
                 </div>
               )}
 
@@ -247,6 +272,26 @@ export default function AdminPage() {
             </div>
           )}
 
+          {/* Section: MCP Configuration */}
+          {activeMenu === 'mcp' && (
+            <div className="space-y-6">
+              <MCPConfigManagement
+                config={mcpConfig}
+                tools={mcpTools}
+                onUpdateConfig={updateMCPConfig}
+                onTestConnection={testMCPConnection}
+                onCreateTool={createMCPTool}
+                onUpdateTool={updateMCPTool}
+                onToggleToolStatus={toggleMCPToolStatus}
+                onDeleteTool={deleteMCPTool}
+                onTestRunTool={testRunMCPTool}
+                savingConfig={savingMcpConfig}
+                savingTool={savingMcpTool}
+                testingConnection={testingConnection}
+                testingTool={testingTool}
+              />
+            </div>
+          )}
 
           {/* Section: Guardrails */}
           {activeMenu === 'guardrails' && <GuardrailsPanel />}
@@ -256,7 +301,6 @@ export default function AdminPage() {
             <div className="space-y-6">
               <div>
                 <h2 className="text-lg font-bold text-emerald-950 dark:text-white">Kesehatan & Monitoring Layanan</h2>
-                <p className="text-xs text-emerald-700 dark:text-slate-400">Status koneksi real-time FastAPI, SIMRS MCP Server, Qdrant Vector, dan Gemini API.</p>
               </div>
               <MonitoringCard monitoring={monitoring} />
             </div>
@@ -267,7 +311,6 @@ export default function AdminPage() {
             <div className="space-y-6">
               <div>
                 <h2 className="text-lg font-bold text-emerald-950 dark:text-white">Analitik Penggunaan & Konsumsi Token</h2>
-                <p className="text-xs text-emerald-700 dark:text-slate-400">Grafik interaksi harian, alokasi token LLM Gemini, dan latensi inferensi.</p>
               </div>
               <AnalyticsView analytics={analytics} />
             </div>

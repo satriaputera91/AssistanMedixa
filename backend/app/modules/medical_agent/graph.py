@@ -5,10 +5,10 @@ from langgraph.graph import StateGraph, END
 
 from app.modules.medical_agent.context.state import MedicalAgentState
 from app.modules.medical_agent.memory.checkpointer import sqlite_checkpointer
-from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end, log_edge_transition
-from app.modules.medical_agent.agent.planner import node_planner
-from app.modules.medical_agent.agent.synthesis import node_gemini_synthesis
-from app.modules.medical_agent.agent.validator import node_validate_output
+from app.modules.medical_agent.logging_utils import log_node_start, log_node_end, log_edge_transition
+from app.modules.medical_agent.skills.planner import node_planner
+from app.modules.medical_agent.skills.synthesis import node_gemini_synthesis
+from app.modules.medical_agent.skills.validator import node_validate_output
 
 from app.modules.medical_agent.skills.anamnesis import node_fetch_patient_history, node_fetch_patient_anamnesis
 from app.modules.medical_agent.skills.diagnostics import node_eval_simrs_labs, node_diagnostic_recommendation
@@ -180,8 +180,54 @@ def _route_planner(state: MedicalAgentState) -> str:
         return "fetch_patient_history"
 
 
+def _route_after_fetch_patient_history(state: MedicalAgentState) -> str:
+    """Routes after fetch_patient_history: if demographics inquiry only, bypass directly to synthesis."""
+    detected_intent = state.get("detected_intent")
+    if detected_intent == "1. Ambil Informasi Demografi Pasien (SIMRS / Satu Sehat)":
+        log_edge_transition(
+            "fetch_patient_history", 
+            "synthesis", 
+            condition="demographics only: Agent Intelligence & Clinical Planner -> 1. Ambil Informasi Demografi Pasien (SIMRS / Satu Sehat) -> LLM Clinical Synthesis"
+        )
+        return "synthesis"
+    return "fetch_patient_anamnesis"
+
+
+def _route_after_synthesis(state: MedicalAgentState) -> str:
+    """If demographics only, finish directly at END; otherwise proceed to validation loop."""
+    detected_intent = state.get("detected_intent")
+    if detected_intent == "1. Ambil Informasi Demografi Pasien (SIMRS / Satu Sehat)":
+        log_edge_transition("synthesis", "END", condition="demographics retrieval workflow completed")
+        return "END"
+    return "validate_output"
+
+
+def _route_validation_loop(state: MedicalAgentState) -> str:
+    """Evaluates whether to iterate for another self-reflection round (up to 3 rounds) or terminate at END."""
+    iteration = state.get("iteration_count", 0)
+    max_iter = state.get("max_iterations", 3)
+    val_report = state.get("output_validation") or {}
+    needs_refinement = val_report.get("needs_refinement", False)
+
+    # Human-in-The-Loop requires user action, terminate directly without looping
+    if state.get("hitl_required"):
+        log_edge_transition("validate_output", "END", condition="HITL required: direct to doctor intake")
+        return "END"
+
+    if iteration < max_iter and needs_refinement:
+        log_edge_transition(
+            "validate_output", 
+            "synthesis", 
+            condition=f"Loop Putaran {iteration + 1}/{max_iter}: Self-reflection & refinement loop"
+        )
+        return "synthesis"
+
+    log_edge_transition("validate_output", "END", condition=f"Loop Selesai pada Putaran {iteration}/{max_iter}")
+    return "END"
+
+
 def build_medical_agent_graph(checkpointer=None):
-    """Builds and compiles the Medical Agent LangGraph StateGraph."""
+    """Builds and compiles the Medical Agent LangGraph StateGraph with 3-Round Refinement Loop."""
     workflow = StateGraph(MedicalAgentState)
     
     # Register Nodes
@@ -222,7 +268,14 @@ def build_medical_agent_graph(checkpointer=None):
     )
     
     # Patient Workflow Pipeline
-    workflow.add_edge("fetch_patient_history", "fetch_patient_anamnesis")
+    workflow.add_conditional_edges(
+        "fetch_patient_history",
+        _route_after_fetch_patient_history,
+        {
+            "synthesis": "synthesis",
+            "fetch_patient_anamnesis": "fetch_patient_anamnesis",
+        },
+    )
     workflow.add_edge("fetch_patient_anamnesis", "eval_simrs_labs")
     workflow.add_edge("eval_simrs_labs", "diagnostic_recommendation")
     workflow.add_edge("diagnostic_recommendation", "km_disease_explanations")
@@ -231,9 +284,16 @@ def build_medical_agent_graph(checkpointer=None):
     workflow.add_edge("km_medication_recommendation", "patient_drug_safety")
     workflow.add_edge("patient_drug_safety", "tools")
     
-    # Core Synthesis & Validation Loop
+    # Core Synthesis & Validation
     workflow.add_edge("tools", "synthesis")
-    workflow.add_edge("synthesis", "validate_output")
+    workflow.add_conditional_edges(
+        "synthesis",
+        _route_after_synthesis,
+        {
+            "validate_output": "validate_output",
+            "END": END,
+        },
+    )
     workflow.add_edge("validate_output", END)
     
     cp = checkpointer if checkpointer is not None else sqlite_checkpointer

@@ -6,14 +6,14 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 from app.core.config import settings
 from app.modules.medical_agent.context.state import MedicalAgentState
-from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
+from app.modules.medical_agent.logging_utils import log_node_start, log_node_end
 from app.modules.medical_agent.tools.simrs_tools import (
     tool_simrs_get_patient_profile,
     tool_simrs_get_patient_labs,
     tool_simrs_get_patient_anamnesis,
     tool_simrs_get_patient_history
 )
-from app.modules.medical_agent.skills.output_schemas import (
+from app.modules.medical_agent.output_schemas import (
     DiarizedUtterance,
     AudioDiarizationSchema,
     AudioConsultationSOAPSchema,
@@ -96,7 +96,7 @@ def _get_fallback_diarization_schema(filename: str, patient_name: str = "Eleanor
 
 def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
     """
-    Transcribes uploaded or recorded clinical audio using Google Gemini Multimodal STT
+    Transcribes uploaded or recorded clinical audio using  Generative AI Multimodal STT
     with structured Pydantic Schema Diarization (Doctor vs Patient separation with timestamps).
     """
     log_node_start("audio_transcription", state, icon="🎙️")
@@ -136,7 +136,7 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
         "4. Kembalikan HANYA string JSON valid tanpa penjelasan tambahan."
     )
 
-    # Attempt Gemini Multimodal Audio Transcription with Structured JSON Schema Diarization
+    # Attempt Generative AI Multimodal Audio Transcription with Structured JSON Schema Diarization
     if audio_bytes and len(audio_bytes) > 200 and api_key and HAS_GOOGLE_GENAI_SDK:
         try:
             client = genai.Client(api_key=api_key)
@@ -155,9 +155,9 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
             if response and response.text:
                 cleaned_json = _clean_json_string(response.text)
                 diarization_model = AudioDiarizationSchema.model_validate_json(cleaned_json)
-                diarization_engine = f"Google Gemini ({settings.GEMINI_MODEL_NAME}) + Pydantic Schema"
+                diarization_engine = f" Generative AI ({settings.GEMINI_MODEL_NAME}) + Pydantic Schema"
         except Exception as e:
-            logger.warning(f"Gemini audio transcription encountered error: {e}. Utilizing Pydantic structured fallback.")
+            logger.warning(f"Generative AI audio transcription encountered error: {e}. Utilizing Pydantic structured fallback.")
 
     if not diarization_model or not diarization_model.utterances:
         diarization_model = _get_fallback_diarization_schema(audio_filename, patient_name=patient_name)
@@ -165,7 +165,7 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
     formatted_transcript = diarization_model.to_formatted_transcript()
 
     steps.append({
-        "step_name": "Transkripsi Audio & Diarisasi Pembicara (Gemini STT)",
+        "step_name": "Transkripsi Audio & Diarisasi Pembicara",
         "description": f"Mentranskripsikan rekaman '{audio_filename}' dengan Diarisasi Pembicara terstruktur berbasis {diarization_engine}.",
         "status": "success",
         "result": {
@@ -190,7 +190,7 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
 def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
     """
     Synthesizes structured S-O-A-P / CPPT notes from the diarized audio consultation transcript
-    using Google Gemini LLM with Pydantic JSON Schema validation, retrieving verified SIMRS
+    using  Generative AI LLM with Pydantic JSON Schema validation, retrieving verified SIMRS
     patient profile, anamnesis, and laboratory data (by NIK or Patient ID / MRN) for complete clinical grounding.
     """
     log_node_start("audio_soap_summary", state, icon="📋")
@@ -201,7 +201,7 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
     audio_filename = state.get("audio_filename", "consultation_recording.wav")
     api_key = settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")
 
-    # 1. Retrieve patient profile from SIMRS MCP via Patient ID, NIK, or MRN
+    # 1. Retrieve patient profile from SIMRS / Satu Sehat via Patient ID, NIK, or MRN
     lookup_key = nik or patient_id or "P-10492"
     simrs_profile = state.get("simrs_profile")
     simrs_labs = state.get("simrs_lab_evaluations")
@@ -229,7 +229,7 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
     # Resolve target MRN
     mrn = simrs_profile.get("mrn") if simrs_profile else (f"MRN-SIMRS-{patient_id.replace('P-', '')}" if patient_id else "MRN-SIMRS-10492")
 
-    # 2. Retrieve verified Anamnesis from SIMRS MCP if not present
+    # 2. Retrieve verified Anamnesis from SIMRS / Satu Sehat if not present
     if mrn and not simrs_anamnesis:
         anamnesis_res = tool_simrs_get_patient_anamnesis(mrn)
         if anamnesis_res.get("status") == "success" and anamnesis_res.get("anamnesis"):
@@ -245,7 +245,7 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
                 }
             })
 
-    # 3. Retrieve verified Laboratory & Vital Signs from SIMRS MCP if not present
+    # 3. Retrieve verified Laboratory & Vital Signs from SIMRS / Satu Sehat if not present
     if mrn and not simrs_labs:
         labs_res = tool_simrs_get_patient_labs(mrn)
         if labs_res.get("status") == "success":
@@ -374,7 +374,7 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
             RedFlagData(title="Hipotensi Ortostatik / Vertigo Berat", severity="Warning", action_required="Cek tekanan darah posisi duduk & berdiri bila pusing memberat")
         ],
         drug_safety_status="Aman (Kontraindikasi Alergi Penisilin & Sulfa Terflagging)",
-        notes="Dihasilkan dari rekaman audio klinis terdiarisasi via Pydantic Schema & Gemini."
+        notes="Dihasilkan dari rekaman audio klinis terdiarisasi via Pydantic Schema & Generative AI."
     )
 
     # Build Prompt with Rich SIMRS Anamnesis & Laboratory Data
@@ -439,7 +439,7 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
         '    {"title": "...", "severity": "Warning", "action_required": "..."}\n'
         '  ],\n'
         '  "drug_safety_status": "Aman",\n'
-        '  "notes": "Sintesis SOAP otomatis via Gemini."\n'
+        '  "notes": "Sintesis SOAP otomatis via Generative AI."\n'
         "}\n\n"
         "Kembalikan HANYA JSON valid tanpa teks atau penjelasan tambahan."
     )
@@ -463,9 +463,9 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
                 soap_dict = json.loads(cleaned_json)
                 soap_dict["patient"] = patient_model.model_dump() if patient_model else None
                 soap_model = ClinicalSOAPOutputSchema.model_validate(soap_dict)
-                soap_engine = f"Google Gemini ({settings.GEMINI_MODEL_NAME}) + Pydantic Schema"
+                soap_engine = f" Generative AI ({settings.GEMINI_MODEL_NAME}) + Pydantic Schema"
         except Exception as e:
-            logger.warning(f"Gemini SOAP JSON extraction encountered error: {e}. Utilizing validated Pydantic model.")
+            logger.warning(f"Generative AI SOAP JSON extraction encountered error: {e}. Utilizing validated Pydantic model.")
 
     # Reconstruct Diarization Model if stored in state
     diarization_model = None
@@ -493,7 +493,7 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
     }
 
     steps.append({
-        "step_name": "Sintesis Catatan SOAP dari Transkrip Audio & SIMRS (Gemini & Pydantic)",
+        "step_name": "Sintesis Catatan SOAP dari Transkrip Audio & SIMRS (Generative AI & Pydantic)",
         "description": f"Mengekstrak dan memvalidasi komponen S/O/A/P terstruktur dari hasil diarisasi audio, anamnesis, dan laboratorium SIMRS menggunakan {soap_engine} untuk pasien {patient_model.full_name} ({patient_model.mrn}).",
         "status": "success",
         "result": {

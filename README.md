@@ -1,17 +1,17 @@
-# 🩺 AssistanMedixa (AIMedical)
+# 🩺 AssistanMedixa (AssistantMedixa)
 
 <div align="center">
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.141+-009688.svg?style=for-the-badge&logo=FastAPI&logoColor=white)](https://fastapi.tiangolo.com)
 [![LangGraph](https://img.shields.io/badge/LangGraph-Agentic_Workflow-FF6F00.svg?style=for-the-badge&logo=LangChain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
-[![Google Gemini](https://img.shields.io/badge/Google_Gemini-2.0_Flash-4285F4.svg?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
+[![Generative AI](https://img.shields.io/badge/Generative_AI-Agentic_LLM-4285F4.svg?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
 [![Qdrant](https://img.shields.io/badge/Qdrant-Vector_RAG-DC2626.svg?style=for-the-badge&logo=qdrant&logoColor=white)](https://qdrant.tech/)
 [![Next.js](https://img.shields.io/badge/Next.js-14_App_Router-000000.svg?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5+-3178C6.svg?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Version](https://img.shields.io/badge/Release-v1.4.0-blue.svg?style=for-the-badge)](VERSION_NOTES.md)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
 
-**Platform Asisten Klinis AI Berbasis Agentic Architecture (FastAPI, LangGraph, Model Context Protocol & Google Gemini)**
+**Platform Asisten Klinis AI Berbasis Agentic Architecture (FastAPI, LangGraph, Model Context Protocol & Generative AI)**
 
 [Fitur Utama](#-fitur-utama) •
 [Arsitektur Sistem](#-arsitektur-sistem) •
@@ -27,9 +27,9 @@
 
 ## 📖 Ringkasan Proyek
 
-**AssistanMedixa (AIMedical)** adalah platform kecerdasan buatan klinis (*Clinical Decision Support System*) yang dirancang untuk membantu tenaga medis (dokter dan staf klinis) dalam mempercepat alur konsultasi pasien, pembuatan rekam medis CPPT/SOAP, analisis anamnesis terstruktur, hingga pengecekan keselamatan resep obat.
+**AssistanMedixa (AssistantMedixa)** adalah platform kecerdasan buatan klinis (*Clinical Decision Support System*) yang dirancang untuk membantu tenaga medis (dokter dan staf klinis) dalam mempercepat alur konsultasi pasien, pembuatan rekam medis CPPT/SOAP, analisis anamnesis terstruktur, hingga pengecekan keselamatan resep obat.
 
-Sistem dibangun dengan arsitektur **Modular Monolith** berkinerja tinggi, mengintegrasikan alur penalaran bertingkat (*multi-step reasoning*) menggunakan **LangGraph**, protokol standar **Model Context Protocol (MCP)** untuk integrasi data SIMRS (Sistem Informasi Manajemen Rumah Sakit), dan **RAG (Retrieval-Augmented Generation)** berbasis Qdrant Vector DB dengan Google Gemini.
+Sistem dibangun dengan arsitektur **Modular Monolith** berkinerja tinggi, mengintegrasikan alur penalaran bertingkat (*multi-step reasoning*) menggunakan **LangGraph**, protokol standar **Model Context Protocol (MCP)** untuk integrasi data SIMRS (Sistem Informasi Manajemen Rumah Sakit), dan **RAG (Retrieval-Augmented Generation)** berbasis Qdrant Vector DB dengan Generative AI.
 
 ---
 
@@ -42,13 +42,13 @@ Sistem dibangun dengan arsitektur **Modular Monolith** berkinerja tinggi, mengin
 - 🔌 **Model Context Protocol (MCP) untuk SIMRS**
   - Standardized tool integration untuk membaca riwayat rekam medis (EMR), hasil laboratorium, alergi obat, dan stok farmasi rumah sakit.
 - 📚 **Clinical Knowledge Vector RAG Engine (Qdrant) & Dokumen PDF/DOCX**
-  - Mesin pencarian semantik panduan praktik klinis (PPK), formularium nasional, diagnosis kerja, dan basis pengetahuan interaksi obat menggunakan **Qdrant Vector DB** dan **Gemini Embeddings**.
+  - Mesin pencarian semantik panduan praktik klinis (PPK), formularium nasional, diagnosis kerja, dan basis pengetahuan interaksi obat menggunakan **Qdrant Vector DB** dan **Generative AI Embeddings**.
   - Dukungan unggah berkas dokumen `.pdf` dan `.docx` dengan ekstraksi teks, pembentukan kata kunci otomatis, dan chunking dokumen ke Vector DB.
 - 🏥 **Manajemen Ruang Poli Klinis (Clinic Room Management)**
   - Panel administrasi untuk mengelola ruangan poli (Penyakit Dalam, Jantung, Bedah, Anak, dll.) lengkap dengan kapasitas antrean harian dan status aktif.
   - Integrasi penugasan dokter jaga dan penyaringan daftar pasien aktif berdasarkan poli terpilih.
 - 🎙️ **Multimodal Audio Consultation & Temp SOAP Storage**
-  - Transkripsi dan ekstraksi poin penting konsultasi verbal dokter-pasien secara instan menggunakan Google Gemini Multimodal.
+  - Transkripsi dan ekstraksi poin penting konsultasi verbal dokter-pasien secara instan menggunakan Generative AI Multimodal.
   - Penyimpanan terstruktur SOAP sementara (`temp_soaps`) pada basis data relasional sebelum dikonfirmasi dan dikirimkan ke SIMRS.
   - Pengayaan otomatis FAQ Medis (Diagnosis, Rekomendasi Obat, Workups/Tindakan) dengan data analisis rekaman audio / SOAP sementara.
 - 🚨 **Clinical Red Flags & Emergency Triage**
@@ -89,12 +89,12 @@ flowchart TD
 
         subgraph Integrations ["Integration Layers"]
             MCP[MCP Server & Client - SIMRS Integration]
-            RAG[RAG Service - Gemini Embeddings]
+            RAG[RAG Service - Generative AI Embeddings]
         end
     end
 
     subgraph External ["External Services & Storage"]
-        Gemini[Google Gemini 2.0 API]
+        GenAI[Generative AI API]
         Qdrant[(Qdrant Vector DB)]
         SQLite[(SQLite Checkpoint DB)]
         SIMRS[(SIMRS / Hospital Database)]
@@ -109,14 +109,14 @@ flowchart TD
     API --> Guardrails
     
     StateGraph --> AnamnesisNode --> DiagnosisNode --> SOAPNode --> PrescriptionNode --> SafetyNode
-    AgenticCore --> Gemini
+    AgenticCore --> GenAI
     AgenticCore --> SQLite
     AgenticCore --> MCP
     AgenticCore --> RAG
 
     MCP --> SIMRS
     RAG --> Qdrant
-    RAG --> Gemini
+    RAG --> GenAI
 ```
 
 ---
@@ -177,7 +177,7 @@ AssistanMedixa/
 ### 📋 Prasyarat Sistem
 - **Python**: Versi `3.10` atau lebih baru
 - **Node.js**: Versi `18.x` atau `20.x` (disertai `npm` atau `pnpm`)
-- **Google Gemini API Key**: Dapatkan dari [Google AI Studio](https://aistudio.google.com/)
+- **Generative AI API Key**: Dapatkan dari [ AI Studio](https://aistudio.google.com/)
 
 ---
 
@@ -242,7 +242,7 @@ AssistanMedixa/
 | **Medical Agent** | `POST` | `/api/v1/agent/chat/stream` | Stream real-time respons & reasoning steps |
 | **Poli / Clinic Rooms** | `GET` / `POST` | `/api/v1/admin/clinic-rooms` | CRUD manajemen ruangan poli klinis |
 | **Poli / Clinic Rooms** | `POST` | `/api/v1/agent/clinic-rooms/select` | Pemilihan ruangan poli aktif dokter |
-| **Chat & STT** | `POST` | `/api/v1/agent/chat/audio` | Transkripsi audio konsultasi dokter & SOAP Temp via Gemini STT |
+| **Chat & STT** | `POST` | `/api/v1/agent/chat/audio` | Transkripsi audio konsultasi dokter & SOAP Temp via Generative AI STT |
 | **RAG & Knowledge** | `POST` | `/api/v1/rag/search` | Pencarian pedoman klinis & literatur obat |
 | **RAG & Knowledge** | `POST` | `/api/v1/rag/upload-file` | Ekstraksi & indexing dokumen pedoman klinis (PDF/DOCX) |
 | **MCP SIMRS** | `POST` | `/api/v1/mcp/execute` | Eksekusi tool pemanggilan data SIMRS |

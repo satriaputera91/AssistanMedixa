@@ -45,7 +45,7 @@ async def upload_document_file(
     specialty: str = Form("General Medicine"),
     current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))
 ):
-    """Document File Upload: Uploads .pdf, .docx, .doc, .txt, .md, .json files and indexes content into Qdrant with Gemini keyword extraction."""
+    """Document File Upload: Uploads .pdf, .docx, .doc, .txt, .md, .json files and indexes content into Qdrant with Generative AI keyword extraction."""
     content_bytes = await file.read()
     raw_text = extract_text_from_file_bytes(file.filename, content_bytes)
 
@@ -58,7 +58,7 @@ async def upload_document_file(
     
     return {
         "status": "success",
-        "message": f"File '{file.filename}' uploaded, keywords extracted by Gemini, and indexed into Qdrant ({ingested_doc['chunks_count']} chunks)",
+        "message": f"File '{file.filename}' uploaded, keywords extracted by Generative AI, and indexed into Qdrant ({ingested_doc['chunks_count']} chunks)",
         "item": ingested_doc,
         "extracted_keywords": ingested_doc.get("keywords", [])
     }
@@ -68,7 +68,7 @@ def extract_keywords_from_content(
     request: ExtractKeywordsRequest,
     current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))
 ):
-    """Uses Gemini LLM to analyze text and extract relevant clinical keywords."""
+    """Uses Generative AI LLM to analyze text and extract relevant clinical keywords."""
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="Konten teks tidak boleh kosong.")
     
@@ -101,7 +101,12 @@ def execute_rag_search(
     current_user: TokenPayload = Depends(require_role(["doctor", "admin"]))
 ):
     """Direct Qdrant RAG Vector Search & Reranking execution."""
-    results = qdrant_rag_service.search(request.query, top_k=request.top_k, category_filter=request.category_filter)
+    results = qdrant_rag_service.search(
+        query=request.query,
+        top_k=request.top_k,
+        category_filter=request.category_filter,
+        similarity_threshold=request.similarity_threshold or 0.5
+    )
     
     formatted_chunks = []
     for item in results:
@@ -116,7 +121,9 @@ def execute_rag_search(
                 evidence_level=payload.get("evidence_level"),
                 reranked_score=item["reranked_score"],
                 boost_applied=item["boost_applied"],
-                chunk_snippet=payload["chunk_text"]
+                chunk_snippet=payload["chunk_text"],
+                vector_score=item.get("vector_score"),
+                bm25_score=item.get("bm25_score")
             )
         )
         

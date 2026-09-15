@@ -64,8 +64,8 @@ export function useAuth(requiredRole?: UserRole | UserRole[]) {
     }
   }, []);
 
-  const logout = useCallback(() => {
-    AuthService.logout();
+  const logout = useCallback(async () => {
+    await AuthService.logout();
     setIsAuthenticated(false);
     setUserRole('');
     setUserName('');

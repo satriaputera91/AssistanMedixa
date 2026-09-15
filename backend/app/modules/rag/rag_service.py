@@ -83,7 +83,7 @@ def extract_text_from_file_bytes(filename: str, content_bytes: bytes) -> str:
 # GEMINI LLM KEYWORD EXTRACTION ENGINE
 # ==============================================================================
 def extract_keywords_with_gemini(text: str, title: Optional[str] = None, max_keywords: int = 10) -> List[str]:
-    """Extracts clinical and domain-specific keywords from medical text using Gemini LLM."""
+    """Extracts clinical and domain-specific keywords from medical text using Generative AI LLM."""
     api_key = settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")
 
     if api_key and HAS_GOOGLE_GENAI:
@@ -118,7 +118,7 @@ def extract_keywords_with_gemini(text: str, title: Optional[str] = None, max_key
                             unique_items.append(item)
                     return unique_items[:max_keywords]
         except Exception as e:
-            logger.warning("Gagal ekstraksi kata kunci dengan Gemini: %s", e)
+            logger.warning("Gagal ekstraksi kata kunci dengan Generative AI: %s", e)
 
     # Fallback heuristic keyword extraction if LLM is unavailable
     words = [w.lower() for w in re.findall(r'[a-zA-Z0-9_-]+', f"{title or ''} {text}") if len(w) > 3]
@@ -217,7 +217,7 @@ class SemanticMarkdownChunker:
 # GEMINI EMBEDDING ENGINE (text-embedding-004)
 # ==============================================================================
 class GeminiEmbeddingEngine:
-    """Generates 768-dimensional embeddings using Gemini text-embedding-004 or dense vector encoder fallback."""
+    """Generates 768-dimensional embeddings using Generative AI text-embedding-004 or dense vector encoder fallback."""
     
     VECTOR_DIM = 768
     
@@ -263,16 +263,20 @@ class GeminiEmbeddingEngine:
 
 
 # ==============================================================================
-# QDRANT VECTOR RAG SERVICE WITH DYNAMIC KNOWLEDGE MANAGEMENT
+# QDRANT VECTOR RAG SERVICE WITH DYNAMIC KNOWLEDGE MANAGEMENT & BM25
 # ==============================================================================
+from app.modules.rag.bm25 import BM25Engine
+
 class DedicatedQdrantRAGService:
-    """Enterprise Qdrant Vector Database Service with Dynamic Knowledge Ingestion, File Upload, and Reranking."""
+    """Enterprise Qdrant Vector Database Service with BM25 Sparse Ranking, Hybrid Retrieval, Dynamic Knowledge Ingestion, and Threshold Filtering."""
     
     COLLECTION_NAME = "medical_knowledge_v1"
     
     def __init__(self):
         self.client = QdrantClient(":memory:")
         self.knowledge_store: Dict[str, Dict[str, Any]] = {}
+        self.chunks_lookup: Dict[str, Dict[str, Any]] = {}
+        self.bm25_engine = BM25Engine(k1=1.5, b=0.75, delta=0.5)
         self.next_point_id = 1
         self._initialize_collection()
         self._seed_initial_knowledge()
@@ -288,16 +292,33 @@ class DedicatedQdrantRAGService:
 
     def _seed_initial_knowledge(self):
         for doc in INITIAL_KNOWLEDGE_BASE:
-            self.add_knowledge_item(doc)
+            self.add_knowledge_item(doc, rebuild_bm25=False)
+        self._rebuild_bm25_index()
 
-    def add_knowledge_item(self, doc: Dict[str, Any]) -> Dict[str, Any]:
-        """Ingests a new knowledge document into Qdrant collection."""
+    def _rebuild_bm25_index(self):
+        """Collects all chunks from all knowledge documents and indexes them in BM25."""
+        all_chunks = []
+        self.chunks_lookup = {}
+        for doc in self.knowledge_store.values():
+            chunks = doc.get("_cached_chunks")
+            if not chunks:
+                chunks = SemanticMarkdownChunker.chunk_document(doc)
+                doc["_cached_chunks"] = chunks
+            for ch in chunks:
+                ch_id = ch["chunk_id"]
+                all_chunks.append(ch)
+                self.chunks_lookup[ch_id] = ch
+        self.bm25_engine.index_chunks(all_chunks)
+        logger.info(f"BM25 Index rebuilt with {len(all_chunks)} chunks across {len(self.knowledge_store)} knowledge docs.")
+
+    def add_knowledge_item(self, doc: Dict[str, Any], rebuild_bm25: bool = True) -> Dict[str, Any]:
+        """Ingests a new knowledge document into Qdrant collection and BM25 index."""
         item_id = doc.get("id") or f"kb-{doc.get('category', 'doc')[:3]}-{int(datetime.now().timestamp())}"
         doc["id"] = item_id
         if "created_at" not in doc:
             doc["created_at"] = datetime.now().isoformat()
             
-        # Auto-extract keywords using Gemini if keywords are empty or not provided
+        # Auto-extract keywords using Generative AI if keywords are empty or not provided
         if not doc.get("keywords"):
             doc["keywords"] = extract_keywords_with_gemini(
                 text=doc.get("content", ""),
@@ -309,6 +330,7 @@ class DedicatedQdrantRAGService:
 
         chunks = SemanticMarkdownChunker.chunk_document(doc)
         doc["chunks_count"] = len(chunks)
+        doc["_cached_chunks"] = chunks
         self.knowledge_store[item_id] = doc
         
         points = []
@@ -327,6 +349,10 @@ class DedicatedQdrantRAGService:
             collection_name=self.COLLECTION_NAME,
             points=points
         )
+
+        if rebuild_bm25:
+            self._rebuild_bm25_index()
+
         return doc
 
     def ingest_uploaded_file(
@@ -337,10 +363,10 @@ class DedicatedQdrantRAGService:
         specialty: str = "General Medicine",
         custom_keywords: Optional[List[str]] = None
     ) -> Dict[str, Any]:
-        """Ingests raw file text upload (.pdf, .docx, .txt, .md, .json) into Qdrant knowledge base with Gemini keyword extraction."""
+        """Ingests raw file text upload (.pdf, .docx, .txt, .md, .json) into Qdrant knowledge base with Generative AI keyword extraction."""
         doc_title = os.path.splitext(filename)[0].replace("_", " ").replace("-", " ").title()
         
-        # Extract keywords with Gemini LLM
+        # Extract keywords with Generative AI LLM
         if custom_keywords:
             keywords = custom_keywords
         else:
@@ -362,7 +388,7 @@ class DedicatedQdrantRAGService:
         return self.add_knowledge_item(doc)
 
     def extract_keywords(self, text: str, title: Optional[str] = None, max_keywords: int = 10) -> List[str]:
-        """Expose Gemini LLM keyword extraction for API callers."""
+        """Expose Generative AI LLM keyword extraction for API callers."""
         return extract_keywords_with_gemini(text, title=title, max_keywords=max_keywords)
 
     def delete_knowledge_item(self, item_id: str) -> bool:
@@ -375,12 +401,14 @@ class DedicatedQdrantRAGService:
             self.next_point_id = 1
             for doc in self.knowledge_store.values():
                 chunks = SemanticMarkdownChunker.chunk_document(doc)
+                doc["_cached_chunks"] = chunks
                 points = []
                 for chunk in chunks:
                     vec = GeminiEmbeddingEngine.get_embedding(chunk["chunk_text"], task_type="RETRIEVAL_DOCUMENT")
                     points.append(PointStruct(id=self.next_point_id, vector=vec, payload=chunk))
                     self.next_point_id += 1
                 self.client.upsert(collection_name=self.COLLECTION_NAME, points=points)
+            self._rebuild_bm25_index()
             return True
         return False
 
@@ -394,54 +422,124 @@ class DedicatedQdrantRAGService:
             "items": items
         }
 
-    def search(self, query: str, top_k: int = 3, category_filter: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Two-Stage Qdrant Retrieval Engine with Reranking."""
+    def search(
+        self, 
+        query: str, 
+        top_k: int = 3, 
+        category_filter: Optional[str] = None,
+        similarity_threshold: float = 0.5
+    ) -> List[Dict[str, Any]]:
+        """
+        Hybrid Qdrant Dense Vector + BM25 Sparse Ranking Search with Reranking and Threshold Filtering (> 0.5).
+        Combines semantic embedding representation with exact term frequency BM25 relevance.
+        """
+        if not query or not query.strip():
+            return []
+
+        # 1. Dense Vector Search via Qdrant
         query_vec = GeminiEmbeddingEngine.get_embedding(query, task_type="RETRIEVAL_QUERY")
-        
         search_results = self.client.query_points(
             collection_name=self.COLLECTION_NAME,
             query=query_vec,
-            limit=20
+            limit=30
         )
         
-        candidates = []
+        # 2. Sparse Lexical Search via BM25
+        bm25_norm_scores = self.bm25_engine.get_normalized_scores(query)
+        bm25_top_results = self.bm25_engine.search(query, top_k=30)
+        
+        candidate_map: Dict[str, Dict[str, Any]] = {}
+        
+        # Add vector candidates
         for point in search_results.points:
             payload = point.payload or {}
+            chunk_id = payload.get("chunk_id") or str(point.id)
             if category_filter and payload.get("category") != category_filter:
                 continue
-            candidates.append({
-                "score": float(point.score),
-                "payload": payload
-            })
             
+            v_score = max(float(point.score), 0.0)
+            b_score = bm25_norm_scores.get(chunk_id, 0.0)
+            
+            candidate_map[chunk_id] = {
+                "chunk_id": chunk_id,
+                "vector_score": v_score,
+                "bm25_score": b_score,
+                "score": v_score,
+                "payload": payload
+            }
+
+        # Add BM25 candidates that might have high lexical relevance
+        for chunk_id, b_score, payload in bm25_top_results:
+            if category_filter and payload.get("category") != category_filter:
+                continue
+            if chunk_id not in candidate_map:
+                # If only found by BM25, calculate cosine vector score or baseline
+                candidate_map[chunk_id] = {
+                    "chunk_id": chunk_id,
+                    "vector_score": 0.40,
+                    "bm25_score": b_score,
+                    "score": b_score,
+                    "payload": payload or self.chunks_lookup.get(chunk_id, {})
+                }
+            else:
+                candidate_map[chunk_id]["bm25_score"] = b_score
+
+        candidates = list(candidate_map.values())
+        
+        # 3. Hybrid Re-ranking & Metadata Boosts
         reranked_results = self._rerank_candidates(query, candidates)
-        return reranked_results[:top_k]
+
+        # 4. Filter by Similarity Threshold (Threshold > 0.5)
+        filtered_results = [
+            item for item in reranked_results 
+            if item.get("reranked_score", item.get("score", 0.0)) > similarity_threshold
+        ]
+        
+        return filtered_results[:top_k]
 
     def _rerank_candidates(self, query: str, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         query_lower = query.lower()
         
         for item in candidates:
             payload = item["payload"]
-            base_score = item["score"]
+            v_score = item.get("vector_score", 0.0)
+            b_score = item.get("bm25_score", 0.0)
+            
             boost = 0.0
             
-            synonyms = [s.lower() for s in payload.get("synonyms", [])]
+            # Domain Metadata Boosts
+            synonyms = [s.lower() for s in payload.get("synonyms", []) if isinstance(s, str)]
             title_lower = payload.get("title", "").lower()
             if any(syn in query_lower for syn in synonyms) or title_lower in query_lower:
-                boost += 0.15
+                boost += 0.12
                 
             icd = payload.get("icd10_code")
             rxnorm = payload.get("rxnorm_code")
             if icd and icd.lower() in query_lower:
-                boost += 0.20
+                boost += 0.15
             if rxnorm and rxnorm.lower() in query_lower:
-                boost += 0.20
+                boost += 0.15
                 
-            keywords = [k.lower() for k in payload.get("keywords", [])]
+            keywords = [k.lower() for k in payload.get("keywords", []) if isinstance(k, str)]
             matched_kw = sum(1 for kw in keywords if kw in query_lower)
-            boost += min(matched_kw * 0.05, 0.15)
+            boost += min(matched_kw * 0.04, 0.12)
             
-            item["reranked_score"] = round(min(base_score + boost, 0.99), 4)
+            # Hybrid Score formula: 0.45 * Vector + 0.40 * BM25 + Domain Boost
+            # When both vector and BM25 match, confidence is significantly enhanced.
+            hybrid_score = (0.45 * v_score) + (0.40 * b_score) + min(boost, 0.15)
+            
+            # Enhanced similarity score guaranteeing strong signal propagation
+            final_similarity = max(
+                hybrid_score,
+                v_score * 0.90 + (boost * 0.5),
+                b_score * 0.85 + (boost * 0.5)
+            )
+            final_similarity = round(min(final_similarity, 0.99), 4)
+
+            item["reranked_score"] = final_similarity
+            item["score"] = final_similarity
+            item["vector_score"] = round(v_score, 4)
+            item["bm25_score"] = round(b_score, 4)
             item["boost_applied"] = round(boost, 2)
             
         candidates.sort(key=lambda x: x["reranked_score"], reverse=True)
@@ -449,3 +547,4 @@ class DedicatedQdrantRAGService:
 
 
 qdrant_rag_service = DedicatedQdrantRAGService()
+

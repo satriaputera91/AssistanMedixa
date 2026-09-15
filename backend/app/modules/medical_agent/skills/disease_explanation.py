@@ -2,7 +2,7 @@ import logging
 import re
 from typing import Dict, Any, List
 from app.modules.medical_agent.context.state import MedicalAgentState
-from app.modules.medical_agent.agent.logging_utils import log_node_start, log_node_end
+from app.modules.medical_agent.logging_utils import log_node_start, log_node_end
 from app.modules.medical_agent.tools.rag_tools import tool_vector_rag_search
 
 def _parse_disease_rag_content(chunk: Dict[str, Any]) -> Dict[str, Any]:

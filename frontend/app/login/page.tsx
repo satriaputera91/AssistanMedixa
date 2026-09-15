@@ -39,10 +39,10 @@ export default function LoginPage() {
         {/* Header */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 text-[10px] font-semibold uppercase tracking-wider mb-4">
-            📚 RAG &amp; Basis Pengetahuan Klinis
+            📚 Dilengkapi Basis Pengetahuan Klinis
           </div>
-          <h1 className="text-3xl font-extrabold text-emerald-950 mb-2">Portal AIMedical</h1>
-          <p className="text-sm text-emerald-700">Platform AI Klinis &amp; SIMRS MCP</p>
+          <h1 className="text-3xl font-extrabold text-emerald-950 mb-2">AssistantMedixa</h1>
+          <p className="text-sm text-emerald-700">Platform AI Klinis Terintegrasi SIMRS / Satu Sehat</p>
         </div>
 
         {/* Error Alert */}
@@ -60,7 +60,7 @@ export default function LoginPage() {
               type="email"
               name="email"
               required
-              placeholder="doctor@aimedical.com"
+              placeholder="doctor@AssistantMedixa.com"
               className="w-full px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-950 placeholder-emerald-400 focus:outline-none focus:border-emerald-500 transition-colors text-sm"
             />
           </div>
@@ -87,13 +87,13 @@ export default function LoginPage() {
           <p className="text-[10px] text-emerald-700 mb-3 uppercase tracking-wider">Akses demo cepat</p>
           <div className="flex gap-2">
             <button
-              onClick={() => quickLogin('doctor@aimedical.com', 'doctor123')}
+              onClick={() => quickLogin('doctor@AssistantMedixa.com', 'doctor123')}
               className="flex-1 py-2 px-3 bg-emerald-100 hover:bg-emerald-200 text-xs font-medium text-emerald-900 rounded-lg border border-emerald-300 transition-colors"
             >
               🩺 Masuk Dokter
             </button>
             <button
-              onClick={() => quickLogin('admin@aimedical.com', 'admin123')}
+              onClick={() => quickLogin('admin@AssistantMedixa.com', 'admin123')}
               className="flex-1 py-2 px-3 bg-emerald-100 hover:bg-emerald-200 text-xs font-medium text-emerald-900 rounded-lg border border-emerald-300 transition-colors"
             >
               ⚙️ Masuk Admin

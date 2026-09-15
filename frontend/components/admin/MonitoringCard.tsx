@@ -36,7 +36,7 @@ export default function MonitoringCard({ monitoring }: MonitoringCardProps) {
             <span>Status Layanan &amp; Kesiapan Sistem</span>
           </h2>
           <p className="text-xs text-emerald-700 mt-0.5">
-            Pemeriksaan operasional FastAPI, Qdrant Vektor RAG, Gemini LLM, dan SIMRS MCP.
+            Pemeriksaan operasional FastAPI, Qdrant Vektor RAG, Generative AI LLM, dan SIMRS / Satu Sehat.
           </p>
         </div>
         <div className="text-right">

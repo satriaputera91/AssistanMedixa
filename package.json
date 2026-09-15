@@ -1,0 +1,9 @@
+{
+  "name": "aimedical-root",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter ./frontend run dev",
+    "build": "pnpm --filter ./frontend run build",
+    "start": "pnpm --filter ./frontend run start"
+  }
+}

@@ -9,7 +9,7 @@ from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 
-samples_dir = Path("/Users/rnd/Program/Personal/AIMedical/samples")
+samples_dir = Path("/Users/rnd/Program/Personal/AssistantMedixa/samples")
 samples_dir.mkdir(parents=True, exist_ok=True)
 
 # Colors for PDF

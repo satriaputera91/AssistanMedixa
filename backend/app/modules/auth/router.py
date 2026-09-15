@@ -32,6 +32,9 @@ def login(request: LoginRequest):
             detail="User account is deactivated"
         )
 
+    # Reset selected clinic room so doctor must pick clinic room upon each new login
+    db.doctor_selected_room.pop(user["id"], None)
+
     access_token = create_access_token(
         subject=user["id"],
         email=user["email"],
@@ -46,6 +49,12 @@ def login(request: LoginRequest):
         role=user["role"],
         specialty=user.get("specialty")
     )
+
+@router.post("/logout")
+def logout(current_user: TokenPayload = Depends(get_current_user)):
+    """Logs out the user and clears their active clinic room / poli selection."""
+    db.doctor_selected_room.pop(current_user.sub, None)
+    return {"status": "ok", "message": "Logged out successfully and clinic room selection reset"}
 
 @router.get("/me", response_model=UserInfo)
 def get_me(current_user: TokenPayload = Depends(get_current_user)):

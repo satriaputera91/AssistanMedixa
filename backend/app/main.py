@@ -20,7 +20,7 @@ from app.modules.guardrails.router import router as guardrails_router
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    description="Agentic AI Medical Platform - Modular Monolith with FastAPI, LangGraph, Gemini API, MCP & Dedicated RAG Module"
+    description="Agentic AI Medical Platform - Modular Monolith with FastAPI, LangGraph, Generative AI API, MCP & Dedicated RAG Module"
 )
 
 logger = logging.getLogger(__name__)

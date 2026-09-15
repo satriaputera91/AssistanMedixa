@@ -41,9 +41,15 @@ export class AuthService {
     return ApiClient.get<UserInfo>('/auth/me');
   }
 
-  public static logout(): void {
-    if (typeof window !== 'undefined') {
-      localStorage.clear();
+  public static async logout(): Promise<void> {
+    try {
+      await ApiClient.post('/auth/logout', {});
+    } catch {
+      // Ignore network errors on logout
+    } finally {
+      if (typeof window !== 'undefined') {
+        localStorage.clear();
+      }
     }
   }
 

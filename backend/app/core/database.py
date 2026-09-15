@@ -197,6 +197,126 @@ class InMemoryDatabase:
         # Temporary SOAP Records from audio & consultation sessions before sync to SIMRS
         self.temp_soap_records: Dict[str, dict] = {}
 
+        # MCP (Model Context Protocol) Server & Dynamic Tools Configuration
+        self.mcp_config: dict = {
+            "server_name": "simrs-hospital-emr-bridge",
+            "protocol_version": "2024-11-05",
+            "mode": "mock",  # "mock" | "live" | "hybrid"
+            "endpoint_url": "https://simrs.hospital.id/api/v1/mcp",
+            "auth_type": "bearer",  # "bearer" | "api_key" | "none"
+            "auth_token": "",
+            "timeout_seconds": 10,
+            "retry_attempts": 3,
+            "enable_audit_logging": True,
+            "auto_sync_enabled": True,
+            "custom_headers": {},
+            "status": "connected",
+            "latency_ms": 12,
+            "last_health_check": now_iso,
+            "updated_at": now_iso,
+        }
+
+        self.mcp_tools: Dict[str, dict] = {
+            "simrs.get_patient_profile": {
+                "name": "simrs.get_patient_profile",
+                "display_name": "Ambil Profil Pasien SIMRS",
+                "description": "Retrieves verified demographic information, BPJS card details, and emergency contacts from SIMRS database.",
+                "category": "patient_data",
+                "is_enabled": True,
+                "is_builtin": True,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "mrn": {"type": "string", "description": "SIMRS Medical Record Number (e.g. MRN-SIMRS-10492 or P-10492)"}
+                    },
+                    "required": ["mrn"]
+                },
+                "execution_count": 0,
+                "last_executed_at": None,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            },
+            "simrs.get_patient_history": {
+                "name": "simrs.get_patient_history",
+                "display_name": "Ambil Riwayat Medis SIMRS",
+                "description": "Retrieves complete inpatient and outpatient visit history, previous discharge summaries, and ongoing chronic disease monitoring notes from SIMRS.",
+                "category": "medical_history",
+                "is_enabled": True,
+                "is_builtin": True,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "mrn": {"type": "string", "description": "SIMRS Medical Record Number"}
+                    },
+                    "required": ["mrn"]
+                },
+                "execution_count": 0,
+                "last_executed_at": None,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            },
+            "simrs.get_patient_anamnesis": {
+                "name": "simrs.get_patient_anamnesis",
+                "display_name": "Ambil Anamnesis Klinis SIMRS",
+                "description": "Retrieves comprehensive clinical anamnesis from SIMRS (Chief Complaint, RPS, RPD, RPK, Allergy & Review of Systems).",
+                "category": "anamnesis",
+                "is_enabled": True,
+                "is_builtin": True,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "mrn": {"type": "string", "description": "SIMRS Medical Record Number"}
+                    },
+                    "required": ["mrn"]
+                },
+                "execution_count": 0,
+                "last_executed_at": None,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            },
+            "simrs.get_patient_labs": {
+                "name": "simrs.get_patient_labs",
+                "display_name": "Evaluasi Hasil Lab & TTV SIMRS",
+                "description": "Retrieves real-time and historical laboratory panels, urinalysis, and vital signs from SIMRS LIS/EMR system.",
+                "category": "laboratory",
+                "is_enabled": True,
+                "is_builtin": True,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "mrn": {"type": "string", "description": "SIMRS Medical Record Number"}
+                    },
+                    "required": ["mrn"]
+                },
+                "execution_count": 0,
+                "last_executed_at": None,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            },
+            "simrs.update_patient_record": {
+                "name": "simrs.update_patient_record",
+                "display_name": "Kirim & Commit CPPT ke SIMRS",
+                "description": "Writes consultation notes, updated primary/secondary diagnoses, and treatment plan into SIMRS Electronic Medical Record (EMR/RME).",
+                "category": "transaction",
+                "is_enabled": True,
+                "is_builtin": True,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "mrn": {"type": "string", "description": "SIMRS Medical Record Number"},
+                        "doctor_notes": {"type": "string", "description": "Clinical assessment notes from doctor/AI co-pilot"},
+                        "primary_diagnosis": {"type": "string", "description": "Primary clinical diagnosis (with ICD-10 code)"},
+                        "treatment_plan": {"type": "string", "description": "Recommended treatment plan & follow-up recommendations"}
+                    },
+                    "required": ["mrn", "doctor_notes", "primary_diagnosis", "treatment_plan"]
+                },
+                "execution_count": 0,
+                "last_executed_at": None,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            },
+        }
+
     def get_assigned_doctors_for_room(self, room_id: str) -> List[dict]:
         """Get list of active doctors assigned to a specific room."""
         assigned = []
@@ -437,6 +557,102 @@ class InMemoryDatabase:
         rec["synced_at"] = now
         rec["updated_at"] = now
         return rec
+
+    # ── Dynamic MCP Configuration & Tool Methods ────────────────────
+
+    def get_mcp_config(self) -> dict:
+        """Get current MCP server configuration."""
+        return dict(self.mcp_config)
+
+    def update_mcp_config(self, updates: dict) -> dict:
+        """Update MCP server configuration."""
+        for k, v in updates.items():
+            if v is not None:
+                self.mcp_config[k] = v
+        self.mcp_config["updated_at"] = datetime.now().isoformat()
+        return dict(self.mcp_config)
+
+    def get_all_mcp_tools(self, active_only: bool = False) -> List[dict]:
+        """Get all configured MCP tools, optionally filtering active ones."""
+        tools = []
+        for t in self.mcp_tools.values():
+            if active_only and not t.get("is_enabled", True):
+                continue
+            tools.append(dict(t))
+        return tools
+
+    def get_mcp_tool(self, tool_name: str) -> Optional[dict]:
+        """Get detail of a single MCP tool."""
+        tool = self.mcp_tools.get(tool_name)
+        return dict(tool) if tool else None
+
+    def create_custom_mcp_tool(self, tool_data: dict) -> dict:
+        """Register a new custom MCP tool."""
+        name = (tool_data.get("name") or "").strip()
+        if not name:
+            raise ValueError("Nama tool MCP tidak boleh kosong.")
+        if name in self.mcp_tools:
+            raise ValueError(f"Tool MCP dengan nama '{name}' sudah terdaftar.")
+
+        now_iso = datetime.now().isoformat()
+        new_tool = {
+            "name": name,
+            "display_name": tool_data.get("display_name") or name,
+            "description": tool_data.get("description") or f"Custom MCP Tool: {name}",
+            "category": tool_data.get("category") or "custom",
+            "is_enabled": tool_data.get("is_enabled", True),
+            "is_builtin": False,
+            "input_schema": tool_data.get("input_schema") or {
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "Parameter kueri / pencarian"}},
+            },
+            "custom_endpoint": tool_data.get("custom_endpoint"),
+            "mock_response": tool_data.get("mock_response"),
+            "execution_count": 0,
+            "last_executed_at": None,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+        self.mcp_tools[name] = new_tool
+        return dict(new_tool)
+
+    def update_mcp_tool(self, tool_name: str, updates: dict) -> Optional[dict]:
+        """Update metadata, description, or schema of an existing MCP tool."""
+        tool = self.mcp_tools.get(tool_name)
+        if not tool:
+            return None
+        for k, v in updates.items():
+            if k not in ("name", "is_builtin", "created_at") and v is not None:
+                tool[k] = v
+        tool["updated_at"] = datetime.now().isoformat()
+        return dict(tool)
+
+    def toggle_mcp_tool_status(self, tool_name: str) -> Optional[dict]:
+        """Toggle active/inactive status of an MCP tool."""
+        tool = self.mcp_tools.get(tool_name)
+        if not tool:
+            return None
+        tool["is_enabled"] = not tool.get("is_enabled", True)
+        tool["updated_at"] = datetime.now().isoformat()
+        return dict(tool)
+
+    def delete_mcp_tool(self, tool_name: str) -> bool:
+        """Delete a custom MCP tool (builtin tools cannot be deleted)."""
+        tool = self.mcp_tools.get(tool_name)
+        if not tool:
+            return False
+        if tool.get("is_builtin", False):
+            raise ValueError(f"Tool bawaan '{tool_name}' tidak dapat dihapus. Anda dapat menonaktifkannya.")
+        del self.mcp_tools[tool_name]
+        return True
+
+    def record_mcp_tool_execution(self, tool_name: str):
+        """Increment tool execution count and record execution timestamp."""
+        tool = self.mcp_tools.get(tool_name)
+        if tool:
+            tool["execution_count"] = tool.get("execution_count", 0) + 1
+            tool["last_executed_at"] = datetime.now().isoformat()
+
 
 dbApplication = InMemoryDatabase()
 db = dbApplication

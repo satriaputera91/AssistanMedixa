@@ -4,29 +4,29 @@ Medical Agent Module - Modular Architecture:
 - context: State definitions, Pydantic Request/Response Schemas, Clinical Prompts
 - memory: SQLite Session Checkpointer
 - skills: Anamnesis, Diagnostics, Pharmacology, Red Flags, Disease Explanation, Audio STT/SOAP, Output Schemas
-- tools: SIMRS MCP Tools, Clinical Calculations, Vector RAG Search & Literature Guidelines
+- tools: SIMRS / Satu Sehat Tools, Clinical Calculations, Vector RAG Search & Literature Guidelines
 """
 
-# Agent Core & Graph
-from app.modules.medical_agent.agent.graph import (
+# Graph & Logging
+from app.modules.medical_agent.graph import (
     medical_agent_graph,
     build_medical_agent_graph,
     node_execute_tools,
     _route_entry_point,
     _route_planner
 )
-from app.modules.medical_agent.agent.planner import (
+from app.modules.medical_agent.skills.planner import (
     node_planner,
     _debug_node_start,
     _debug_node_end,
     _debug_edge
 )
-from app.modules.medical_agent.agent.synthesis import (
+from app.modules.medical_agent.skills.synthesis import (
     node_gemini_synthesis,
     _generate_fallback_synthesis
 )
-from app.modules.medical_agent.agent.validator import node_validate_output
-from app.modules.medical_agent.agent.logging_utils import (
+from app.modules.medical_agent.skills.validator import node_validate_output
+from app.modules.medical_agent.logging_utils import (
     log_node_start,
     log_node_end,
     log_edge_transition
@@ -50,7 +50,10 @@ from app.modules.medical_agent.context.schemas import (
     TempSOAPContentSchema,
     TempSOAPRecordSchema,
     TempSOAPUpdateRequest,
-    TempSOAPCommitResponse
+    TempSOAPCommitResponse,
+    CreateManualTempSOAPRequest,
+    HITLOptionSchema,
+    HITLDataSchema
 )
 
 # Memory: Checkpointer
@@ -78,7 +81,7 @@ from app.modules.medical_agent.skills.audio_soap import (
     node_audio_transcription,
     node_audio_soap_summary
 )
-from app.modules.medical_agent.skills.output_schemas import (
+from app.modules.medical_agent.output_schemas import (
     VitalSignsData,
     LabItemData,
     PatientDemographicsData,

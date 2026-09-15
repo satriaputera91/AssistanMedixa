@@ -121,7 +121,7 @@ export default function AudioRecorderModal({ isOpen, onClose, onSendAudio, disab
       streamRef.current = null;
     }
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current.close().catch(() => { });
       audioContextRef.current = null;
     }
     setRecording(false);
@@ -416,7 +416,7 @@ export default function AudioRecorderModal({ isOpen, onClose, onSendAudio, disab
           </div>
           <h3 className="text-base font-bold text-emerald-950 dark:text-white">Rekam Konsultasi Klinis (WAV)</h3>
           <p className="text-xs text-emerald-700 dark:text-slate-400 mt-0.5">
-            Gemini STT akan mentranskripsikan suara &amp; membuat resume otomatis S/O/A.
+            Generative AI STT akan mentranskripsikan suara &amp; membuat resume otomatis S/O/A.
           </p>
         </div>
 
@@ -442,11 +442,10 @@ export default function AudioRecorderModal({ isOpen, onClose, onSendAudio, disab
               {/* Real-time VU Audio Level Meter */}
               <div className="w-full h-3 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden p-0.5 border border-emerald-300 dark:border-slate-600">
                 <div
-                  className={`h-full rounded-full transition-all duration-75 ${
-                    audioLevel > 75
+                  className={`h-full rounded-full transition-all duration-75 ${audioLevel > 75
                       ? 'bg-gradient-to-r from-emerald-500 via-amber-500 to-red-500'
                       : 'bg-gradient-to-r from-emerald-400 to-emerald-600'
-                  }`}
+                    }`}
                   style={{ width: `${Math.max(5, audioLevel)}%` }}
                 />
               </div>

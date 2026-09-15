@@ -94,4 +94,4 @@ if __name__ == "__main__":
     test_pdf_text_extraction()
     test_gemini_keyword_extraction()
     test_qdrant_ingest_uploaded_docx()
-    print("✅ All PDF, DOCX, and Gemini keyword extraction tests passed successfully!")
+    print("✅ All PDF, DOCX, and Generative AI keyword extraction tests passed successfully!")
