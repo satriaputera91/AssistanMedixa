@@ -119,7 +119,9 @@ export function useAgentChat() {
         (statusEv) => {
           if (statusEv.node_name) {
             setActiveNode(statusEv.node_name);
-            setCompletedNodes(prev => (prev.includes(statusEv.node_name!) ? prev : [...prev, statusEv.node_name!]));
+            if (statusEv.status === 'node_completed') {
+              setCompletedNodes(prev => (prev.includes(statusEv.node_name!) ? prev : [...prev, statusEv.node_name!]));
+            }
           }
           if (statusEv.summary) {
             setLatestSummary(statusEv.summary);
@@ -230,12 +232,32 @@ export function useAgentChat() {
     setMessages(prev => [...prev, userMsg]);
     setExecuting(true);
     setSteps([]);
+    setActiveNode('audio_transcription');
+    setCompletedNodes([]);
+    setLatestSummary('Memproses rekaman audio dan memulai transkripsi...');
 
     try {
-      const data = await AgentService.executeAudioChat(
+      const data = await AgentService.executeAudioChatStream(
         audio,
         selectedPatient || null,
         activeSessionId || null,
+        (statusEv) => {
+          if (statusEv.node_name) {
+            setActiveNode(statusEv.node_name);
+            if (statusEv.status === 'node_completed') {
+              setCompletedNodes(prev => (prev.includes(statusEv.node_name!) ? prev : [...prev, statusEv.node_name!]));
+            }
+          }
+          if (statusEv.summary) {
+            setLatestSummary(statusEv.summary);
+          }
+          if (statusEv.step) {
+            setSteps(prev => {
+              const alreadyHas = prev.some(s => s.step_name === statusEv.step.step_name);
+              return alreadyHas ? prev : [...prev, statusEv.step];
+            });
+          }
+        }
       );
       if (data.temp_soap) {
         setActiveTempSOAP(data.temp_soap);
@@ -268,6 +290,9 @@ export function useAgentChat() {
       }]);
     } finally {
       setExecuting(false);
+      setTimeout(() => {
+        setActiveNode(null);
+      }, 3000);
     }
 
   }, [executing, selectedPatient, activeSessionId, loadSessions]);

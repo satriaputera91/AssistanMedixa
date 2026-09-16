@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     
     # Generative AI API settings
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL_NAME: str = "gemini-2.5-flash"
-    GEMINI_STT_MODEL_NAME: str = "gemini-2.5-flash"
+    GEMINI_MODEL_NAME: str = "gemini-2.5-flash-lite"
+    GEMINI_STT_MODEL_NAME: str = "gemini-2.5-flash-lite"
     MAX_AUDIO_UPLOAD_BYTES: int = 25 * 1024 * 1024
     
     # LangGraph SQLite Checkpointer settings

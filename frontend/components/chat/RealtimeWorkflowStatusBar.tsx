@@ -13,8 +13,11 @@ export interface RealtimeWorkflowStatusBarProps {
 const WORKFLOW_PIPELINE_NODES = [
   { key: 'planner', label: 'Planner', icon: '🧠' },
   { key: 'fetch_patient_history', label: 'SIMRS EMR', icon: '👤' },
+  { key: 'fetch_patient_anamnesis', label: 'Anamnesis', icon: '📝' },
   { key: 'eval_simrs_labs', label: 'Lab & Vitals', icon: '🧪' },
   { key: 'diagnostic_recommendation', label: 'Diagnosis', icon: '🎯' },
+  { key: 'km_disease_explanations', label: 'Knowledge', icon: '📚' },
+  { key: 'km_red_flag_detection', label: 'Red Flag', icon: '🚨' },
   { key: 'km_medication_recommendation', label: 'Medication', icon: '💊' },
   { key: 'patient_drug_safety', label: 'Drug Safety', icon: '🛡️' },
   { key: 'tools', label: 'MCP & RAG', icon: '🛠️' },
@@ -59,23 +62,23 @@ export default function RealtimeWorkflowStatusBar({
           {/* Node Progression Pipeline Tracker */}
           <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none">
             {WORKFLOW_PIPELINE_NODES.map((node, idx) => {
-              const isCurrent = activeNode === node.key;
               const isDone = completedNodes.includes(node.key);
+              const isCurrent = activeNode === node.key;
 
               return (
                 <div key={node.key} className="flex items-center shrink-0">
                   <div
                     className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition-all ${
-                      isCurrent
+                      isCurrent && executing
                         ? 'bg-emerald-600 text-white font-bold shadow-xs scale-105 animate-pulse'
                         : isDone
-                        ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-900 dark:text-emerald-300 border border-emerald-300/60 dark:border-emerald-800'
+                        ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-900 dark:text-emerald-300 border border-emerald-300/60 dark:border-emerald-800 shadow-2xs font-semibold'
                         : 'bg-slate-100 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 opacity-60'
                     }`}
                   >
                     <span>{node.icon}</span>
                     <span className="whitespace-nowrap">{node.label}</span>
-                    {isDone && <span className="text-emerald-600 dark:text-emerald-400 text-[9px]">✓</span>}
+                    {isDone && <span className="text-emerald-600 dark:text-emerald-400 text-[9px] font-bold">✓</span>}
                   </div>
 
                   {idx < WORKFLOW_PIPELINE_NODES.length - 1 && (

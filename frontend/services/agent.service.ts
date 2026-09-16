@@ -1,4 +1,4 @@
-import { ApiClient } from './api.client';
+import { ApiClient, API_BASE_URL } from './api.client';
 
 export interface AgentChatRequest {
   user_query: string;
@@ -164,14 +164,17 @@ export class AgentService {
     onWorkflowStatus?: (event: WorkflowStatusEvent) => void,
   ): Promise<AgentChatResponse> {
     const token = ApiClient.getToken();
-    const response = await fetch('/api/v1/agent/chat/stream', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    const response = await fetch(
+      `${API_BASE_URL}/agent/chat/stream`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(request),
       },
-      body: JSON.stringify(request),
-    });
+    );
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -208,9 +211,9 @@ export class AgentService {
 
         for (const line of block.split('\n')) {
           if (line.startsWith('event:')) {
-            eventType = line.replace('event:', '').trim();
+            eventType = line.slice(6).trim();
           } else if (line.startsWith('data:')) {
-            dataStr += line.replace('data:', '').trim();
+            dataStr += line.slice(5).trim();
           }
         }
 
@@ -254,6 +257,99 @@ export class AgentService {
     if (sessionId) formData.append('session_id', sessionId);
 
     return ApiClient.post<AgentChatResponse>('/agent/chat/audio', formData, true);
+  }
+
+  public static async executeAudioChatStream(
+    audio: File,
+    patientId?: string | null,
+    sessionId?: string | null,
+    onWorkflowStatus?: (event: WorkflowStatusEvent) => void,
+  ): Promise<AgentChatResponse> {
+    const token = ApiClient.getToken();
+    const formData = new FormData();
+    formData.append('audio', audio);
+    if (patientId) formData.append('patient_id', patientId);
+    if (sessionId) formData.append('session_id', sessionId);
+
+    const response = await fetch(
+      `${API_BASE_URL}/agent/chat/audio/stream`,
+      {
+        method: 'POST',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: formData,
+      },
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorDetail = 'Gagal melakukan stream pemrosesan audio AI';
+      try {
+        const parsed = JSON.parse(errorText);
+        errorDetail = parsed.detail || parsed.message || errorDetail;
+      } catch {}
+      throw new Error(errorDetail);
+    }
+
+    if (!response.body) {
+      throw new Error('Response stream tidak tersedia.');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let finalResponse: AgentChatResponse | null = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split('\n\n');
+      buffer = blocks.pop() || '';
+
+      for (const block of blocks) {
+        if (!block.trim()) continue;
+
+        let eventType = 'message';
+        let dataStr = '';
+
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event:')) {
+            eventType = line.slice(6).trim();
+          } else if (line.startsWith('data:')) {
+            dataStr += line.slice(5).trim();
+          }
+        }
+
+        if (!dataStr) continue;
+
+        try {
+          const parsed = JSON.parse(dataStr);
+          if (eventType === 'workflow_status') {
+            if (onWorkflowStatus) {
+              onWorkflowStatus(parsed as WorkflowStatusEvent);
+            }
+          } else if (eventType === 'complete') {
+            finalResponse = parsed as AgentChatResponse;
+          } else if (eventType === 'error') {
+            throw new Error(parsed.error || 'Terjadi kesalahan pada pemrosesan audio AI');
+          }
+        } catch (e: any) {
+          if (eventType === 'error' || (e.message && e.message.includes('kesalahan'))) {
+            throw e;
+          }
+          console.error('Failed to parse SSE chunk:', e, dataStr);
+        }
+      }
+    }
+
+    if (!finalResponse) {
+      throw new Error('Stream selesai tanpa menerima respon final dari agen.');
+    }
+
+    return finalResponse;
   }
 
   public static async reviewSOA(noteId: string, content: SOAContent): Promise<SOAReviewResponse> {

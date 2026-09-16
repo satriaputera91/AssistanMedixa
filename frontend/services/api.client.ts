@@ -1,4 +1,5 @@
-const API_BASE_URL = '/api/v1';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+export const API_BASE_URL = `${BACKEND_URL}/api/v1`;
 
 export class ApiError extends Error {
   constructor(

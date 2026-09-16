@@ -2,8 +2,8 @@ import logging
 import os
 import json
 import asyncio
-
-logger = logging.getLogger("medical_agent.router")
+import threading
+import queue
 import re
 from uuid import uuid4
 from datetime import datetime
@@ -21,7 +21,10 @@ from app.modules.medical_agent import (
     TempSOAPCommitResponse, CreateManualTempSOAPRequest,
     medical_agent_graph
 )
+from app.modules.medical_agent.logging_utils import register_status_queue, unregister_status_queue, NODE_DISPLAY_MAP
 from app.modules.medical_agent.tools.simrs_tools import tool_simrs_update_patient_record
+
+logger = logging.getLogger("medical_agent.router")
 
 AUDIO_STORAGE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../uploads/audio"))
 os.makedirs(AUDIO_STORAGE_DIR, exist_ok=True)
@@ -352,10 +355,11 @@ def execute_agent_chat_stream(
     config = {"configurable": {"thread_id": turn_thread_id}}
 
     def sse_event(event_type: str, data: dict) -> str:
+    
         return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     def event_stream():
-        # 1. Yield initial started event
+        # 1. Yield initial started event immediately
         yield sse_event("workflow_status", {
             "status": "running",
             "phase": "started",
@@ -368,118 +372,116 @@ def execute_agent_chat_stream(
             "timestamp": datetime.now().isoformat()
         })
 
-        accumulated_state = dict(initial_state)
-        node_display = {
-            "planner": {"label": "Planner", "icon": "🧠"},
-            "fetch_patient_history": {"label": "SIMRS EMR", "icon": "👤"},
-            "fetch_patient_anamnesis": {"label": "Anamnesis", "icon": "📝"},
-            "eval_simrs_labs": {"label": "Lab & Vitals", "icon": "🧪"},
-            "diagnostic_recommendation": {"label": "Diagnosis", "icon": "🎯"},
-            "km_disease_explanations": {"label": "Disease Knowledge", "icon": "📚"},
-            "km_red_flag_detection": {"label": "Red Flag", "icon": "🚨"},
-            "km_medication_recommendation": {"label": "Medication", "icon": "💊"},
-            "patient_drug_safety": {"label": "Drug Safety", "icon": "🛡️"},
-            "tools": {"label": "MCP & RAG", "icon": "🛠️"},
-            "synthesis": {"label": "Synthesis", "icon": "🩺"},
-            "validate_output": {"label": "Guardrails", "icon": "🛡️"},
-        }
+        final_state = dict(initial_state)
 
         try:
-            for event in medical_agent_graph.stream(initial_state, config=config, stream_mode="updates"):
-                for node_name, updates in event.items():
-                    accumulated_state.update(updates)
-                    latest_step = None
-                    if "steps_executed" in updates and updates["steps_executed"]:
-                        latest_step = updates["steps_executed"][-1]
+            for chunk in medical_agent_graph.stream(initial_state, config=config, stream_mode="updates"):
+                for node_name, node_update in chunk.items():
+                    if isinstance(node_update, dict):
+                        final_state.update(node_update)
 
-                    display = node_display.get(node_name, {"label": node_name, "icon": "⚙️"})
-                    summary = latest_step.get("description", f"Node {display['label']} selesai") if latest_step else f"Node {display['label']} selesai"
-                    
+                    display = NODE_DISPLAY_MAP.get(
+                        node_name,
+                        {"label": node_name, "icon": "⚡", "desc": f"Node {node_name} selesai diproses."}
+                    )
+
+                    step = None
+                    if isinstance(node_update, dict) and "steps_executed" in node_update and node_update["steps_executed"]:
+                        step = node_update["steps_executed"][-1]
+
                     yield sse_event("workflow_status", {
                         "status": "node_completed",
+                        "phase": "node_completed",
                         "node_name": node_name,
                         "label": display["label"],
                         "icon": display["icon"],
+                        "summary": display.get("desc", f"Menyelesaikan {display['label']}"),
+                        "step": step,
                         "session_id": session_id,
                         "patient_id": request.patient_id,
-                        "summary": summary,
-                        "step": latest_step,
-                        "total_steps": len(accumulated_state.get("steps_executed", [])),
                         "timestamp": datetime.now().isoformat()
                     })
 
-            # Update DB session & history
-            doctor_name = current_user.email
-            user_rec = dbApplication.users.get(current_user.sub)
-            if user_rec:
-                doctor_name = user_rec["name"]
-
-            if session_id not in dbApplication.chat_sessions:
-                dbApplication.chat_sessions[session_id] = {
-                    "session_id": session_id,
-                    "user_id": current_user.sub,
-                    "title": request.user_query[:40] + ("..." if len(request.user_query) > 40 else ""),
-                    "created_at": datetime.now().isoformat(),
-                    "patient_id": request.patient_id,
-                    "messages": []
-                }
-
-            final_synthesis = accumulated_state.get("final_synthesis", "")
-            dbApplication.chat_sessions[session_id]["messages"].append({
-                "role": "user",
-                "content": request.user_query,
-                "timestamp": datetime.now().isoformat()
-            })
-            dbApplication.chat_sessions[session_id]["messages"].append({
-                "role": "assistant",
-                "content": final_synthesis,
-                "timestamp": datetime.now().isoformat(),
-                "metadata": {
-                    "steps": accumulated_state.get("steps_executed", []),
-                    "hitl_required": accumulated_state.get("hitl_required", False),
-                    "hitl_data": accumulated_state.get("hitl_data"),
-                    "structured_output": accumulated_state.get("structured_output"),
-                    "output_validation": accumulated_state.get("output_validation"),
-                    "iteration_count": accumulated_state.get("iteration_count", 1),
-                    "iteration_history": accumulated_state.get("iteration_history", []),
-                }
-            })
-
-            # Log action in audit trail
-            dbApplication.audit_logs.insert(0, {
-                "id": f"log-{len(dbApplication.audit_logs)+1}",
-                "timestamp": datetime.now().isoformat(),
-                "user_id": current_user.sub,
-                "doctor_name": doctor_name,
-                "action": "LangGraph Medical Agent Stream Execution",
-                "details": f"Query: '{request.user_query[:50]}' | Patient: {request.patient_id or 'N/A'}",
-                "tokens_used": 750 + len(final_synthesis) // 4,
-                "status": "Success"
-            })
-
-            chat_response = AgentChatResponse(
-                session_id=session_id,
-                user_query=request.user_query,
-                patient_id=request.patient_id,
-                steps_executed=accumulated_state.get("steps_executed", []),
-                final_synthesis=final_synthesis,
-                workflow_type="text",
-                output_validation=accumulated_state.get("output_validation"),
-                structured_output=accumulated_state.get("structured_output"),
-                hitl_required=accumulated_state.get("hitl_required", False),
-                hitl_data=accumulated_state.get("hitl_data"),
-                temp_soap=accumulated_state.get("temp_soap_data"),
-            )
-
-            yield sse_event("complete", chat_response.model_dump())
+            try:
+                state_snapshot = medical_agent_graph.get_state(config)
+                if state_snapshot and state_snapshot.values:
+                    final_state = state_snapshot.values
+            except Exception as snap_err:
+                logger.debug("Checkpointer snapshot fallback: %s", snap_err)
 
         except Exception as exc:
-            logger.exception("Error in LangGraph streaming chat execution: %s", exc)
+            logger.exception("Error in LangGraph stream execution: %s", exc)
             yield sse_event("error", {
                 "error": str(exc),
                 "session_id": session_id,
                 "timestamp": datetime.now().isoformat()
             })
+            return
+
+        # Update DB session & history
+        doctor_name = current_user.email
+        user_rec = dbApplication.users.get(current_user.sub)
+        if user_rec:
+            doctor_name = user_rec["name"]
+
+        if session_id not in dbApplication.chat_sessions:
+            dbApplication.chat_sessions[session_id] = {
+                "session_id": session_id,
+                "user_id": current_user.sub,
+                "title": request.user_query[:40] + ("..." if len(request.user_query) > 40 else ""),
+                "created_at": datetime.now().isoformat(),
+                "patient_id": request.patient_id,
+                "messages": []
+            }
+
+        final_synthesis = final_state.get("final_synthesis", "")
+        dbApplication.chat_sessions[session_id]["messages"].append({
+            "role": "user",
+            "content": request.user_query,
+            "timestamp": datetime.now().isoformat()
+        })
+        dbApplication.chat_sessions[session_id]["messages"].append({
+            "role": "assistant",
+            "content": final_synthesis,
+            "timestamp": datetime.now().isoformat(),
+            "metadata": {
+                "steps": final_state.get("steps_executed", []),
+                "hitl_required": final_state.get("hitl_required", False),
+                "hitl_data": final_state.get("hitl_data"),
+                "structured_output": final_state.get("structured_output"),
+                "output_validation": final_state.get("output_validation"),
+                "iteration_count": final_state.get("iteration_count", 1),
+                "iteration_history": final_state.get("iteration_history", []),
+            }
+        })
+
+        # Log action in audit trail
+        dbApplication.audit_logs.insert(0, {
+            "id": f"log-{len(dbApplication.audit_logs)+1}",
+            "timestamp": datetime.now().isoformat(),
+            "user_id": current_user.sub,
+            "doctor_name": doctor_name,
+            "action": "LangGraph Medical Agent Stream Execution",
+            "details": f"Query: '{request.user_query[:50]}' | Patient: {request.patient_id or 'N/A'}",
+            "tokens_used": 750 + len(final_synthesis) // 4,
+            "status": "Success"
+        })
+
+        chat_response = AgentChatResponse(
+            session_id=session_id,
+            user_query=request.user_query,
+            patient_id=request.patient_id,
+            steps_executed=final_state.get("steps_executed", []),
+            final_synthesis=final_synthesis,
+            workflow_type="text",
+            output_validation=final_state.get("output_validation"),
+            structured_output=final_state.get("structured_output"),
+            hitl_required=final_state.get("hitl_required", False),
+            hitl_data=final_state.get("hitl_data"),
+            temp_soap=final_state.get("temp_soap_data"),
+        )
+
+        yield sse_event("complete", chat_response.model_dump())
 
     return StreamingResponse(
         event_stream(),
@@ -688,6 +690,246 @@ async def execute_audio_chat(
     )
 
 
+@router.post("/chat/audio/stream")
+async def execute_audio_chat_stream(
+    audio: UploadFile = File(...),
+    patient_id: str | None = Form(None),
+    session_id: str | None = Form(None),
+    current_user: TokenPayload = Depends(require_role(["doctor", "admin"])),
+):
+    """Process audio recording through Generative AI STT with real-time SSE streaming for workflow progress updates."""
+    filename = audio.filename or "audio.mp3"
+    allowed_exts = (".wav", ".mp3", ".mpeg", ".m4a", ".ogg")
+    if not any(filename.lower().endswith(ext) for ext in allowed_exts):
+        raise HTTPException(status_code=415, detail="Format audio tidak didukung. Harap unggah file audio MP3 atau WAV.")
+
+    raw_audio_bytes = await audio.read()
+    if not raw_audio_bytes:
+        raise HTTPException(status_code=400, detail="File audio kosong.")
+    if len(raw_audio_bytes) > settings.MAX_AUDIO_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Ukuran audio melebihi batas {settings.MAX_AUDIO_UPLOAD_BYTES // (1024 * 1024)} MB.",
+        )
+
+    # Convert audio to WAV synchronously before streaming begins
+    audio_bytes = convert_audio_to_wav_ffmpeg(raw_audio_bytes, filename=filename)
+
+    audio_label = f"[Rekaman Audio] {filename}"
+    resolved_session_id = session_id or f"session-{int(datetime.now().timestamp())}"
+    turn_thread_id = f"{resolved_session_id}-turn-{int(datetime.now().timestamp() * 1000)}"
+    config = {"configurable": {"thread_id": turn_thread_id}}
+
+    initial_state = {
+        "messages": [{"role": "user", "content": audio_label}],
+        "patient_id": patient_id,
+        "user_query": audio_label,
+        "workflow_type": "audio",
+        "audio_bytes": audio_bytes,
+        "audio_filename": filename,
+        "audio_mime_type": "audio/wav",
+        "audio_transcript": None,
+        "audio_error": None,
+        "steps_executed": [],
+        "ehr_data": None,
+        "drug_interaction_findings": None,
+        "literature_summary": None,
+        "final_synthesis": "",
+    }
+
+    def sse_event(event_type: str, data: dict) -> str:
+        return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    def event_stream():
+        # 1. Yield initial started event
+        yield sse_event("workflow_status", {
+            "status": "running",
+            "phase": "started",
+            "node_name": "audio_transcription",
+            "label": "Transkripsi Audio",
+            "icon": "🎙️",
+            "summary": "Memproses rekaman audio dan memulai transkripsi...",
+            "session_id": resolved_session_id,
+            "patient_id": patient_id,
+            "timestamp": datetime.now().isoformat()
+        })
+
+        final_state = dict(initial_state)
+
+        try:
+            for chunk in medical_agent_graph.stream(initial_state, config=config, stream_mode="updates"):
+                for node_name, node_update in chunk.items():
+                    if isinstance(node_update, dict):
+                        final_state.update(node_update)
+
+                    display = NODE_DISPLAY_MAP.get(
+                        node_name,
+                        {"label": node_name, "icon": "⚡", "desc": f"Node {node_name} selesai diproses."}
+                    )
+
+                    step = None
+                    if isinstance(node_update, dict) and "steps_executed" in node_update and node_update["steps_executed"]:
+                        step = node_update["steps_executed"][-1]
+
+                    yield sse_event("workflow_status", {
+                        "status": "node_completed",
+                        "phase": "node_completed",
+                        "node_name": node_name,
+                        "label": display["label"],
+                        "icon": display["icon"],
+                        "summary": display.get("desc", f"Menyelesaikan {display['label']}"),
+                        "step": step,
+                        "session_id": resolved_session_id,
+                        "patient_id": patient_id,
+                        "timestamp": datetime.now().isoformat()
+                    })
+
+            try:
+                state_snapshot = medical_agent_graph.get_state(config)
+                if state_snapshot and state_snapshot.values:
+                    final_state = state_snapshot.values
+            except Exception as snap_err:
+                logger.debug("Checkpointer snapshot fallback: %s", snap_err)
+
+        except Exception as exc:
+            logger.exception("Error in audio LangGraph stream execution: %s", exc)
+            yield sse_event("error", {
+                "error": str(exc),
+                "session_id": resolved_session_id,
+                "timestamp": datetime.now().isoformat()
+            })
+            return
+
+        # ── Post-processing: persist audio, create temp SOAP, update session ──
+
+        # Ensure chat session exists
+        if resolved_session_id not in dbApplication.chat_sessions:
+            dbApplication.chat_sessions[resolved_session_id] = {
+                "session_id": resolved_session_id,
+                "user_id": current_user.sub,
+                "title": f"Audio: {filename}"[:40],
+                "created_at": datetime.now().isoformat(),
+                "patient_id": patient_id,
+                "temp_soap_id": None,
+                "messages": [],
+            }
+        elif current_user.role != "admin" and dbApplication.chat_sessions[resolved_session_id]["user_id"] != current_user.sub:
+            yield sse_event("error", {
+                "error": "Forbidden access to chat session",
+                "session_id": resolved_session_id,
+                "timestamp": datetime.now().isoformat()
+            })
+            return
+
+        # Persist audio file to disk
+        file_unique_id = uuid4().hex[:8]
+        saved_filename = f"rec_{file_unique_id}_{filename}"
+        saved_filepath = os.path.join(AUDIO_STORAGE_DIR, saved_filename)
+        try:
+            with open(saved_filepath, "wb") as f:
+                f.write(audio_bytes)
+        except Exception as e:
+            print(f"Error saving audio file: {e}")
+
+        # Resolve doctor & patient metadata
+        doctor_name = current_user.email
+        user_rec = dbApplication.users.get(current_user.sub)
+        if user_rec:
+            doctor_name = user_rec.get("name", current_user.email)
+
+        patient_name = None
+        mrn = None
+        nik = None
+        if patient_id and patient_id in dbApplication.patient_records:
+            pat_rec = dbApplication.patient_records[patient_id]
+            patient_name = pat_rec.get("name")
+            mrn = pat_rec.get("patient_id")
+            nik = pat_rec.get("nik")
+        elif patient_id:
+            patient_name = "Eleanor Vance"
+            mrn = f"MRN-SIMRS-{patient_id.replace('P-', '')}"
+
+        # Extract clean SOAP content
+        soap_content_dict = _extract_soap_from_state(final_state)
+
+        # Create Temp SOAP record
+        temp_soap_rec = None
+        soa_note = None
+        if final_state.get("audio_transcript") and not final_state.get("audio_error"):
+            soa_note = _create_soap_note(final_state["final_synthesis"], resolved_session_id, current_user.sub, final_state=final_state)
+            temp_soap_rec = dbApplication.create_temp_soap(
+                session_id=resolved_session_id,
+                patient_id=patient_id,
+                user_id=current_user.sub,
+                doctor_name=doctor_name,
+                audio_filename=filename,
+                audio_url=f"/api/v1/agent/soap-temp/audio-file/{saved_filename}",
+                audio_path=saved_filepath,
+                audio_size_bytes=len(raw_audio_bytes),
+                audio_transcript=final_state.get("audio_transcript") or "",
+                soap_content=soap_content_dict,
+                raw_markdown=final_state["final_synthesis"],
+                structured_output=final_state.get("structured_output"),
+                patient_name=patient_name,
+                mrn=mrn,
+                nik=nik,
+            )
+            dbApplication.chat_sessions[resolved_session_id]["temp_soap_id"] = temp_soap_rec["temp_id"]
+
+        dbApplication.chat_sessions[resolved_session_id]["messages"].extend([
+            {"role": "user", "content": audio_label, "timestamp": datetime.now().isoformat()},
+            {
+                "role": "assistant",
+                "content": final_state["final_synthesis"],
+                "timestamp": datetime.now().isoformat(),
+                "metadata": {
+                    "type": "temp_soap" if temp_soap_rec else ("soa_note" if soa_note else None),
+                    "temp_id": temp_soap_rec["temp_id"] if temp_soap_rec else None,
+                    "temp_soap": temp_soap_rec,
+                    "audio_url": temp_soap_rec["audio_url"] if temp_soap_rec else None,
+                    "note": soa_note,
+                    "steps": final_state.get("steps_executed", []),
+                },
+            },
+        ])
+        dbApplication.audit_logs.insert(0, {
+            "id": f"log-{len(dbApplication.audit_logs) + 1}",
+            "timestamp": datetime.now().isoformat(),
+            "user_id": current_user.sub,
+            "doctor_name": doctor_name,
+            "action": "Generative AI Audio STT & Temporary SOAP Created (Stream)",
+            "details": f"Audio: '{filename}' | Patient: {patient_id or 'N/A'} | Temp SOAP: {temp_soap_rec['temp_id'] if temp_soap_rec else 'N/A'}",
+            "tokens_used": len(final_state["final_synthesis"]) // 4,
+            "status": "Success" if not final_state.get("audio_error") else "Failed",
+        })
+
+        chat_response = AgentChatResponse(
+            session_id=resolved_session_id,
+            user_query=audio_label,
+            patient_id=patient_id,
+            steps_executed=final_state["steps_executed"],
+            final_synthesis=final_state["final_synthesis"],
+            workflow_type="audio",
+            audio_transcript=final_state.get("audio_transcript"),
+            soa_note=_serialize_soa_note(soa_note) if soa_note else None,
+            temp_soap=TempSOAPRecordSchema(**temp_soap_rec) if temp_soap_rec else None,
+            output_validation=final_state.get("output_validation"),
+            structured_output=final_state.get("structured_output"),
+        )
+
+        yield sse_event("complete", chat_response.model_dump())
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
 # ── Temporary SOAP Pre-SIMRS Endpoints ──────────────────────────────
 
 @router.post("/soap-temp", response_model=TempSOAPRecordSchema)
@@ -824,6 +1066,8 @@ def update_temp_soap(
         updates["status"] = request.status
 
     updated = dbApplication.update_temp_soap(temp_id, updates)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Gagal memperbarui data SOAP Temp.")
     dbApplication.audit_logs.insert(0, {
         "id": f"log-{len(dbApplication.audit_logs) + 1}",
         "timestamp": datetime.now().isoformat(),

@@ -153,8 +153,11 @@ const DEFAULT_NODE_PHASES: Record<string, StatusPhaseConfig> = {
 const FALLBACK_PROGRESSION_KEYS = [
   'planner',
   'fetch_patient_history',
+  'fetch_patient_anamnesis',
   'eval_simrs_labs',
   'diagnostic_recommendation',
+  'km_disease_explanations',
+  'km_red_flag_detection',
   'km_medication_recommendation',
   'patient_drug_safety',
   'tools',
