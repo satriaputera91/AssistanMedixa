@@ -9,7 +9,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-14_App_Router-000000.svg?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5+-3178C6.svg?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Version](https://img.shields.io/badge/Release-v1.4.0-blue.svg?style=for-the-badge)](VERSION_NOTES.md)
-[![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/License-Non--Commercial_/_Commercial_By_Request-amber.svg?style=for-the-badge)](LICENSE)
 
 **Platform Asisten Klinis AI Berbasis Agentic Architecture (FastAPI, LangGraph, Model Context Protocol & Generative AI)**
 
@@ -335,9 +335,15 @@ Seluruh layanan (**MongoDB**, **Backend FastAPI**, dan **Frontend Next.js**) tel
 
 ---
 
-## 📄 Lisensi
+## 📄 Lisensi & Penggunaan Komersial
 
-Didistribusikan di bawah Lisensi MIT. Lihat file `LICENSE` untuk informasi lebih lanjut.
+Hak Cipta © 2026 **Satria Putera**. Seluruh hak dilindungi undang-undang.
+
+- **Penggunaan Non-Komersial (Gratis):** Diizinkan untuk keperluan pembelajaran pribadi, riset akademik, dan evaluasi non-komersial dengan tetap mencantumkan atribusi hak cipta.
+- **Penggunaan Komersial (Wajib Izin Tertulis):** Apabila Anda atau institusi Anda (rumah sakit, klinik, perusahaan, atau vendor) ingin menggunakan, mengintegrasikan, men-deploy, atau mendistribusikan perangkat lunak ini untuk **tujuan komersial / operasional produksi**, Anda **wajib menghubungi pemilik hak cipta terlebih dahulu** untuk mendapatkan lisensi komersial resmi:
+  - **Kontak Pemilik:** [Satria Putera (GitHub @satriaputera91)](https://github.com/satriaputera91)
+
+Lihat file [`LICENSE`](LICENSE) untuk ketentuan hukum selengkapnya.
 
 ---
 
