@@ -164,11 +164,14 @@ class GeminiMCPService:
                 temperature=0.2,
             )
 
-            # Initial call to Generative AI with tools enabled
-            response = client.models.generate_content(
-                model=self.model_name,
+            from app.core.llm_fallback import generate_content_with_fallback
+
+            # Initial call to Generative AI with tools enabled (with fallback LLM chain)
+            response, used_model = generate_content_with_fallback(
+                client=client,
                 contents=prompt,
-                config=config
+                config=config,
+                primary_model=self.model_name,
             )
 
             # Check for function calls from Generative AI
@@ -199,10 +202,11 @@ class GeminiMCPService:
                 
                 follow_up_prompt = f"{prompt}\n\n[INFORMASI DARI TOOLS MCP SIMRS]:\n{tools_summary_str}\n\nSintesiskan jawaban klinis lengkap berdasarkan data di atas."
                 
-                synthesis_res = client.models.generate_content(
-                    model=self.model_name,
+                synthesis_res, used_model = generate_content_with_fallback(
+                    client=client,
                     contents=follow_up_prompt,
-                    config=types.GenerateContentConfig(system_instruction=sys_inst, temperature=0.2)
+                    config=types.GenerateContentConfig(system_instruction=sys_inst, temperature=0.2),
+                    primary_model=used_model,
                 )
                 final_text = (synthesis_res.text or "").strip()
             else:

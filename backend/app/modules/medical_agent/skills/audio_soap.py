@@ -139,23 +139,26 @@ def node_audio_transcription(state: MedicalAgentState) -> MedicalAgentState:
     # Attempt Generative AI Multimodal Audio Transcription with Structured JSON Schema Diarization
     if audio_bytes and len(audio_bytes) > 200 and api_key and HAS_GOOGLE_GENAI_SDK:
         try:
+            from app.core.llm_fallback import generate_content_with_fallback
             client = genai.Client(api_key=api_key)
             audio_part = types.Part.from_bytes(
                 data=audio_bytes,
                 mime_type=audio_mime
             )
-            response = client.models.generate_content(
-                model=settings.GEMINI_MODEL_NAME,
+            response, active_stt_model = generate_content_with_fallback(
+                client=client,
                 contents=[audio_part, diarization_prompt],
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     temperature=0.1
-                )
+                ),
+                primary_model=settings.GEMINI_STT_MODEL_NAME,
+                is_stt=True,
             )
             if response and response.text:
                 cleaned_json = _clean_json_string(response.text)
                 diarization_model = AudioDiarizationSchema.model_validate_json(cleaned_json)
-                diarization_engine = f" Generative AI ({settings.GEMINI_MODEL_NAME}) + Pydantic Schema"
+                diarization_engine = f" Generative AI ({active_stt_model}) + Pydantic Schema"
         except Exception as e:
             logger.warning(f"Generative AI audio transcription encountered error: {e}. Utilizing Pydantic structured fallback.")
 
@@ -449,21 +452,23 @@ def node_audio_soap_summary(state: MedicalAgentState) -> MedicalAgentState:
 
     if api_key and HAS_GOOGLE_GENAI_SDK and len(transcript) > 50:
         try:
+            from app.core.llm_fallback import generate_content_with_fallback
             client = genai.Client(api_key=api_key)
-            resp = client.models.generate_content(
-                model=settings.GEMINI_MODEL_NAME,
+            resp, active_soap_model = generate_content_with_fallback(
+                client=client,
                 contents=soap_schema_prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     temperature=0.1
-                )
+                ),
+                primary_model=settings.GEMINI_MODEL_NAME,
             )
             if resp and resp.text:
                 cleaned_json = _clean_json_string(resp.text)
                 soap_dict = json.loads(cleaned_json)
                 soap_dict["patient"] = patient_model.model_dump() if patient_model else None
                 soap_model = ClinicalSOAPOutputSchema.model_validate(soap_dict)
-                soap_engine = f" Generative AI ({settings.GEMINI_MODEL_NAME}) + Pydantic Schema"
+                soap_engine = f" Generative AI ({active_soap_model}) + Pydantic Schema"
         except Exception as e:
             logger.warning(f"Generative AI SOAP JSON extraction encountered error: {e}. Utilizing validated Pydantic model.")
 

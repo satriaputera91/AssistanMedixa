@@ -98,9 +98,11 @@ def extract_keywords_with_gemini(text: str, title: Optional[str] = None, max_key
                 "Format respon: HANYA tuliskan kata kunci yang dipisahkan dengan tanda koma (contoh: diabetes melitus, metformin, hba1c, nefropati diabetik, insulin, hiperglikemia). "
                 "JANGAN sertakan nomor urut, judul tambahan, atau kalimat pembuka/penutup."
             )
-            response = client.models.generate_content(
-                model=settings.GEMINI_MODEL_NAME or "gemini-2.0-flash",
-                contents=prompt
+            from app.core.llm_fallback import generate_content_with_fallback
+            response, _ = generate_content_with_fallback(
+                client=client,
+                contents=prompt,
+                primary_model=settings.GEMINI_MODEL_NAME,
             )
             if response and response.text:
                 raw = response.text.strip()

@@ -51,10 +51,13 @@ def classify_intent_with_gemini_function_calling(
             temperature=0.1,
         )
 
-        response = client.models.generate_content(
-            model=settings.GEMINI_MODEL_NAME,
+        from app.core.llm_fallback import generate_content_with_fallback
+
+        response, _ = generate_content_with_fallback(
+            client=client,
             contents=prompt,
-            config=config
+            config=config,
+            primary_model=settings.GEMINI_MODEL_NAME,
         )
 
         function_calls = getattr(response, "function_calls", None)

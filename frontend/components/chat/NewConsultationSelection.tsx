@@ -76,11 +76,11 @@ export default function NewConsultationSelection({
       </div>
 
       {activeMode === 'selection' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          {/* Option 1: General Consultation */}
+        <div className="grid grid-cols-1 max-w-xl mx-auto gap-5">
+          {/* Option 1: General Consultation (Hidden) */}
           <div
             onClick={onSelectGeneral}
-            className="group relative bg-white dark:bg-slate-900 border-2 border-emerald-200/80 dark:border-slate-800 hover:border-emerald-500 dark:hover:border-emerald-500 rounded-3xl p-6 sm:p-7 shadow-sm hover:shadow-xl transition-all cursor-pointer flex flex-col justify-between"
+            className="hidden group relative bg-white dark:bg-slate-900 border-2 border-emerald-200/80 dark:border-slate-800 hover:border-emerald-500 dark:hover:border-emerald-500 rounded-3xl p-6 sm:p-7 shadow-sm hover:shadow-xl transition-all cursor-pointer flex-col justify-between"
           >
             <div>
               <div className="flex items-center justify-between mb-4">

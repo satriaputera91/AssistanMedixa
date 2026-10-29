@@ -1,0 +1,89 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: aimedical-mongodb
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USER:-medixa}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD:-admin2026}
+      MONGO_INITDB_DATABASE: ${MONGODB_DATABASE:-assistant_medixa}
+    ports:
+      - "${MONGODB_PORT:-27017}:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+      - ./docker/mongodb/init-mongo.sh:/docker-entrypoint-initdb.d/init-mongo.sh:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - aimedical_network
+
+  backend:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    container_name: aimedical-backend
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      MONGODB_HOST: mongodb
+      MONGODB_PORT: 27017
+      MONGODB_URL: mongodb://${MONGODB_USER:-medixa}:${MONGODB_PASSWORD:-admin2026}@mongodb:27017/${MONGODB_DATABASE:-assistant_medixa}?authSource=${MONGODB_AUTH_SOURCE:-assistant_medixa}
+    ports:
+      - "3038:3038"
+    volumes:
+      - ./backend/uploads:/app/backend/uploads
+      - backend_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3038/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - aimedical_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_BACKEND_URL: http://localhost:3038
+        INTERNAL_BACKEND_URL: http://backend:3038
+    container_name: aimedical-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 8086
+      NEXT_PUBLIC_BACKEND_URL: http://localhost:3038
+      INTERNAL_BACKEND_URL: http://backend:3038
+    ports:
+      - "8086:8086"
+    networks:
+      - aimedical_network
+
+networks:
+  aimedical_network:
+    name: aimedical_network
+    driver: bridge
+
+volumes:
+  mongodb_data:
+    name: aimedical_mongodb_data
+  mongodb_config:
+    name: aimedical_mongodb_config
+  backend_data:
+    name: aimedical_backend_data

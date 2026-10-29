@@ -1,0 +1,25 @@
+# Git & IDE
+.git
+.gitignore
+.vscode
+.idea
+
+# Virtual environments & dependencies
+.venv
+venv
+node_modules
+frontend/node_modules
+frontend/.next
+
+# Python cache
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Large local SQLite checkpointer files
+backend/checkpoints.db
+backend/checkpoints.db-shm
+backend/checkpoints.db-wal
+

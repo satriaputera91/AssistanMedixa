@@ -1,4 +1,4 @@
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3038';
 export const API_BASE_URL = `${BACKEND_URL}/api/v1`;
 
 export class ApiError extends Error {
@@ -118,7 +118,7 @@ export class ApiClient {
           window.dispatchEvent(
             new CustomEvent('api_connection_error', {
               detail: {
-                message: 'Tidak dapat terhubung ke server backend (Port 8000). Server mungkin sedang dimulai ulang.',
+                message: 'Tidak dapat terhubung ke server backend (Port 3038). Server mungkin sedang dimulai ulang.',
               },
             })
           );

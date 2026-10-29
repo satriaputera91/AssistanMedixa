@@ -6,10 +6,12 @@ source .venv/bin/activate
 
 export PYTHONPATH=$(pwd)/backend
 
+PORT=${PORT:-3038}
+
 echo "=========================================================="
 echo "🩺 Starting AssistantMedixa Modular Monolith Application Server"
-echo "URL: http://localhost:8000"
-echo "API Documentation: http://localhost:8000/docs"
+echo "URL: http://localhost:${PORT}"
+echo "API Documentation: http://localhost:${PORT}/docs"
 echo "=========================================================="
 
-python3 -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+python3 -m uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT} --reload

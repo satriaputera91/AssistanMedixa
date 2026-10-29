@@ -967,15 +967,16 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
 
     if api_key and HAS_LANGCHAIN_GEMINI:
         try:
-            llm = ChatGoogleGenerativeAI(
-                model=settings.GEMINI_MODEL_NAME,
-                google_api_key=api_key,
-                temperature=0.2
+            from app.core.llm_fallback import invoke_langchain_gemini_with_fallback
+            response, _ = invoke_langchain_gemini_with_fallback(
+                messages=[
+                    SystemMessage(content=system_instruction),
+                    HumanMessage(content=prompt_context),
+                ],
+                api_key=api_key,
+                primary_model=settings.GEMINI_MODEL_NAME,
+                temperature=0.2,
             )
-            response = llm.invoke([
-                SystemMessage(content=system_instruction),
-                HumanMessage(content=prompt_context)
-            ])
             if isinstance(response.content, list):
                 final_text = "".join([
                     part.get("text", "") if isinstance(part, dict) else str(part)
@@ -990,18 +991,44 @@ def node_gemini_synthesis(state: MedicalAgentState) -> MedicalAgentState:
                 detected_intent=state.get("detected_intent")
             )
         except Exception as e:
-            final_text, structured_output = _generate_fallback_synthesis(
-                query, ehr_data, simrs_profile, simrs_history, simrs_anamnesis, simrs_labs,
-                diagnostic_rec, disease_exp, red_flags, med_rec, drug_safety,
-                simrs_update_res, drug_findings, lit_summary, rag_chunks, error_note=str(e),
-                detected_intent=state.get("detected_intent")
-            )
+            if HAS_GOOGLE_GENAI_SDK:
+                try:
+                    from app.core.llm_fallback import generate_content_with_fallback
+                    client = genai.Client(api_key=api_key)
+                    response, _ = generate_content_with_fallback(
+                        client=client,
+                        contents=f"{system_instruction}\n\n{prompt_context}",
+                        primary_model=settings.GEMINI_MODEL_NAME,
+                    )
+                    final_text = (response.text or "").strip()
+                    _, structured_output = _generate_fallback_synthesis(
+                        query, ehr_data, simrs_profile, simrs_history, simrs_anamnesis, simrs_labs,
+                        diagnostic_rec, disease_exp, red_flags, med_rec, drug_safety,
+                        simrs_update_res, drug_findings, lit_summary, rag_chunks,
+                        detected_intent=state.get("detected_intent")
+                    )
+                except Exception as inner_e:
+                    final_text, structured_output = _generate_fallback_synthesis(
+                        query, ehr_data, simrs_profile, simrs_history, simrs_anamnesis, simrs_labs,
+                        diagnostic_rec, disease_exp, red_flags, med_rec, drug_safety,
+                        simrs_update_res, drug_findings, lit_summary, rag_chunks, error_note=str(inner_e),
+                        detected_intent=state.get("detected_intent")
+                    )
+            else:
+                final_text, structured_output = _generate_fallback_synthesis(
+                    query, ehr_data, simrs_profile, simrs_history, simrs_anamnesis, simrs_labs,
+                    diagnostic_rec, disease_exp, red_flags, med_rec, drug_safety,
+                    simrs_update_res, drug_findings, lit_summary, rag_chunks, error_note=str(e),
+                    detected_intent=state.get("detected_intent")
+                )
     elif api_key and HAS_GOOGLE_GENAI_SDK:
         try:
+            from app.core.llm_fallback import generate_content_with_fallback
             client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model=settings.GEMINI_MODEL_NAME,
-                contents=f"{system_instruction}\n\n{prompt_context}"
+            response, _ = generate_content_with_fallback(
+                client=client,
+                contents=f"{system_instruction}\n\n{prompt_context}",
+                primary_model=settings.GEMINI_MODEL_NAME,
             )
             final_text = (response.text or "").strip()
             _, structured_output = _generate_fallback_synthesis(

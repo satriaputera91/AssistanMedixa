@@ -127,22 +127,24 @@ flowchart TD
 AssistanMedixa/
 ├── backend/
 │   ├── app/
-│   │   ├── core/                  # Konfigurasi aplikasi, database, dan security
+│   │   ├── core/                  # Konfigurasi aplikasi, database, security, & LLM fallback
 │   │   │   ├── config.py
-│   │   │   ├── database.py        # SQLAlchemy models (User, ChatSession, TempSOAP, etc.)
+│   │   │   ├── database.py        # Persistence & database models
+│   │   │   ├── llm_fallback.py    # Automatic Gemini LLM & STT fallback chain
 │   │   │   └── security.py
 │   │   ├── modules/               # Domain modules (Modular Monolith)
 │   │   │   ├── admin/             # Dashboard admin, user management, & analytics
 │   │   │   ├── auth/              # JWT authentication & authorization
 │   │   │   ├── chat/              # Chat session management & Audio STT
 │   │   │   ├── guardrails/        # Safety verification & clinical rules
-│   │   │   ├── mcp/               # Model Context Protocol (SIMRS Server/Client)
+│   │   │   ├── mcp/               # Model Context Protocol (SIMRS & SATUSEHAT Server/Client)
 │   │   │   ├── medical_agent/     # LangGraph Agent Graph, skills, state, & clinical tools
 │   │   │   └── rag/               # Vector search, initial knowledge base, & Qdrant service
 │   │   │       ├── initial_knowledge.py  # 21 Clinical reference knowledge documents
 │   │   │       └── rag_service.py        # Dedicated Qdrant RAG service
 │   │   └── main.py                # FastAPI entry point & middleware
-│   ├── tests/                     # Automated test suites (40 unit tests)
+│   ├── tests/                     # Automated test suites
+│   ├── Dockerfile                 # Dockerfile untuk Backend FastAPI (Port 3038)
 │   ├── run.sh                     # Backend launch script
 │   └── .env.example               # Template environment variable backend
 │
@@ -161,9 +163,16 @@ AssistanMedixa/
 │   │   └── knowledge/             # Document uploader (PDF/DOCX), table & search explorer
 │   ├── hooks/                     # Custom React Hooks
 │   ├── services/                  # API Client Services
+│   ├── Dockerfile                 # Dockerfile untuk Frontend Next.js (Port 8086)
+│   ├── next.config.js             # Konfigurasi Next.js & proxy API rewrites
 │   ├── tailwind.config.js         # Tailwind styling configuration
 │   └── package.json               # Frontend dependencies & scripts
 │
+├── docker/
+│   └── mongodb/
+│       └── init-mongo.sh          # Script inisialisasi user & database MongoDB
+├── docker-compose.yml             # Orkestrasi Docker Compose (MongoDB, Backend, Frontend)
+├── .dockerignore                  # Docker build context ignore rules
 ├── .gitignore                     # Git ignore rules
 ├── requirements.txt               # Python backend dependencies
 ├── VERSION_NOTES.md               # Catatan rilis dan riwayat versi
@@ -175,13 +184,69 @@ AssistanMedixa/
 ## 🚀 Instalasi & Penggunaan
 
 ### 📋 Prasyarat Sistem
-- **Python**: Versi `3.10` atau lebih baru
-- **Node.js**: Versi `18.x` atau `20.x` (disertai `npm` atau `pnpm`)
-- **Generative AI API Key**: Dapatkan dari [ AI Studio](https://aistudio.google.com/)
+- **Docker & Docker Compose** *(Direkomendasikan untuk menjalankan seluruh stack)*
+- **Python**: Versi `3.10` atau lebih baru *(untuk instalasi manual)*
+- **Node.js**: Versi `18.x` atau `20.x` disertai `pnpm` / `npm` *(untuk instalasi manual)*
+- **Google Gemini API Key**: Dapatkan dari [Google AI Studio](https://aistudio.google.com/)
 
 ---
 
-### 1️⃣ Konfigurasi Backend
+### 🐳 Opsi A: Menjalankan dengan Docker Compose (Direkomendasikan)
+
+Seluruh layanan (**MongoDB**, **Backend FastAPI**, dan **Frontend Next.js**) telah dikonfigurasi di dalam `docker-compose.yml`.
+
+1. **Pastikan file `backend/.env` sudah dikonfigurasi:**
+   ```bash
+   cp backend/.env.example backend/.env
+   ```
+   Sesuaikan `GEMINI_API_KEY`, kredensial SatuSehat (`SS_*`), serta konfigurasi MongoDB (`MONGODB_*`) di `backend/.env`:
+   ```env
+   GEMINI_MODEL_NAME=gemini-3.8-flash
+   GEMINI_STT_MODEL_NAME=gemini-3.8-flash
+   GEMINI_FALLBACK_MODELS=gemini-3.5-flash-lite,gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-3.1-flash-lite,gemini-flash-latest,gemini-flash-lite-latest
+
+   MONGODB_HOST=localhost
+   MONGODB_PORT=27017
+   MONGODB_USER=medixa
+   MONGODB_PASSWORD=admin2026
+   MONGODB_DATABASE=assistant_medixa
+   MONGODB_AUTH_SOURCE=assistant_medixa
+   ```
+
+2. **Jalankan seluruh container (MongoDB + Backend + Frontend):**
+   ```bash
+   docker-compose --env-file ./backend/.env up -d --build
+   ```
+   Atau jika hanya ingin menjalankan container **MongoDB** saja:
+   ```bash
+   docker-compose --env-file ./backend/.env up -d mongodb
+   ```
+
+3. **Akses Layanan:**
+   | Layanan | Container Name | Port | URL / Endpoint |
+   | :--- | :--- | :--- | :--- |
+   | **Frontend Web UI** | `aimedical-frontend` | `8086` | `http://localhost:8086` |
+   | **Backend API** | `aimedical-backend` | `3038` | `http://localhost:3038` |
+   | **Swagger API Docs** | `aimedical-backend` | `3038` | `http://localhost:3038/docs` |
+   | **MongoDB** | `aimedical-mongodb` | `27017` | `mongodb://medixa:admin2026@localhost:27017/assistant_medixa?authSource=assistant_medixa` |
+
+4. **Perintah Berguna Docker Compose:**
+   ```bash
+   # Melihat status container
+   docker-compose ps
+
+   # Melihat log layanan secara real-time
+   docker-compose logs -f backend frontend mongodb
+
+   # Menghentikan seluruh layanan
+   docker-compose down
+   ```
+
+---
+
+### 💻 Opsi B: Menjalankan Secara Manual (Local Development)
+
+#### 1️⃣ Konfigurasi Backend (Port `3038`)
 
 1. **Buat dan aktifkan Virtual Environment:**
    ```bash
@@ -204,31 +269,34 @@ AssistanMedixa/
 4. **Jalankan Backend Server:**
    ```bash
    cd backend
-   uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+   uvicorn app.main:app --host 0.0.0.0 --port 3038 --reload
    ```
-   *Swagger API Documentation akan tersedia di `http://localhost:8000/docs`.*
+   *Swagger API Documentation akan tersedia di `http://localhost:3038/docs`.*
 
----
-
-### 2️⃣ Konfigurasi Frontend
+#### 2️⃣ Konfigurasi Frontend (Port `8086`)
 
 1. **Pindah ke direktori frontend:**
    ```bash
    cd frontend
    ```
 
-2. **Instal dependensi Node.js:**
-   ```bash
-   npm install
-   # atau menggunakan pnpm
-   pnpm install
+2. **Pastikan `frontend/.env` mengarah ke port Backend (`3038`):**
+   ```env
+   NEXT_PUBLIC_BACKEND_URL=http://localhost:3038
    ```
 
-3. **Jalankan Frontend Development Server:**
+3. **Instal dependensi Node.js:**
    ```bash
-   npm run dev
+   pnpm install
+   # atau menggunakan npm
+   npm install
    ```
-   *Aplikasi web akan dapat diakses di `http://localhost:3000`.*
+
+4. **Jalankan Frontend Development Server pada Port `8086`:**
+   ```bash
+   pnpm run dev -- -p 8086
+   ```
+   *Aplikasi web akan dapat diakses di `http://localhost:8086`.*
 
 ---
 
